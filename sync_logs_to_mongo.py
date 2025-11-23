@@ -10,7 +10,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 
 # If not set, use hardcoded URI as fallback
 if not MONGO_URI:
-    MONGO_URI = "mongodb+srv://quick_user:said2005@cluster0.kr90782.mongodb.net/"
+    MONGO_URI = "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/"
     print("⚠️ Using hardcoded MONGO_URI (environment variable not set)")
 else:
     print("✓ Using MONGO_URI from environment variable")
@@ -23,8 +23,8 @@ except Exception as e:
     print(f"❌ Failed to connect to MongoDB: {e}")
     sys.exit(1)
 
-db = client["quickannonce"]
-col = db["users"]
+db = client["quickannonce_second"]
+col = db["users_second"]
 
 if not os.path.exists("logs.json"):
     print("Aucun fichier logs.json trouvé.")
