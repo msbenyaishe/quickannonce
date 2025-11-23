@@ -1,0 +1,11 @@
+# Disable caching for PHP & HTML
+<FilesMatch "\.(php|html)$">
+  Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  Header set Pragma "no-cache"
+  Header set Expires 0
+</FilesMatch>
+
+# Disable static caching
+<IfModule mod_expires.c>
+  ExpiresActive Off
+</IfModule>
