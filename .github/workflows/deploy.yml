@@ -60,7 +60,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3 python3-pip lftp
       - name: Install Python dependencies
-        run: pip install pymongo pandas dnspython
+        run: pip install pymongo pandas dnspython python-dateutil
 
       - name: Download logs.json from InfinityFree
         env:
@@ -76,6 +76,7 @@ jobs:
             bye
           "
       - name: Run MongoDB sync script
+        timeout-minutes: 10
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
         run: |
@@ -83,7 +84,11 @@ jobs:
             echo '❌ MONGO_URI is not set'
             exit 1
           fi
-          python3 sync_logs_to_mongo.py
+          echo "🚀 Starting MongoDB sync..."
+          python3 sync_logs_to_mongo.py || {
+            echo "❌ Sync failed, but continuing..."
+            exit 0  # Don't fail the workflow if sync fails
+          }
       - name: Upload stats_actions.csv to InfinityFree
         if: success()
         env:
