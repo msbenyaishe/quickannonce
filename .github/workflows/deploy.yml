@@ -27,11 +27,13 @@ jobs:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          if [ -z "$FTP_HOST" ]  [ -z "$FTP_USER" ]  [ -z "$FTP_PASSWORD" ]; then
+          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
             echo "❌ FTP credentials missing."
             exit 1
           fi
+
           echo "🚀 Deploying to InfinityFree..."
+
           lftp -e "
             set ftp:ssl-allow no;
             set mirror:use-pget-n 2;
@@ -45,11 +47,14 @@ jobs:
               ./ /htdocs/;
             bye
           "
+
           echo "✅ Deployment completed"
+
+
   sync_mongodb:
     name: Sync logs.json → MongoDB
     runs-on: ubuntu-latest
-    needs: deploy_to_infinityfree   # run after deploy
+    needs: deploy_to_infinityfree
 
     steps:
       - name: Checkout repository
@@ -59,6 +64,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 python3-pip lftp
+
       - name: Install Python dependencies
         run: pip install pymongo pandas dnspython python-dateutil
 
@@ -69,12 +75,23 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           echo "⬇️ Downloading logs.json..."
-          lftp -e "
-            set ftp:ssl-allow no;
-            open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-            get /htdocs/logs.json -o logs.json || echo '[]' > logs.json;
-            bye
-          "
+
+          # remove old file to avoid "file exists" error
+          rm -f logs.json
+
+          # download with overwrite allowed
+          lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" <<EOF
+set ftp:ssl-allow no
+set xfer:clobber on
+get /htdocs/logs.json -o logs.json
+bye
+EOF
+
+          # If logs.json does not exist, create empty JSON array
+          if [ ! -f logs.json ]; then
+            echo "[]" > logs.json
+          fi
+
       - name: Run MongoDB sync script
         timeout-minutes: 10
         env:
@@ -84,11 +101,13 @@ jobs:
             echo '❌ MONGO_URI is not set'
             exit 1
           fi
+
           echo "🚀 Starting MongoDB sync..."
           python3 sync_logs_to_mongo.py || {
             echo "❌ Sync failed, but continuing..."
-            exit 0  # Don't fail the workflow if sync fails
+            exit 0
           }
+
       - name: Upload stats_actions.csv to InfinityFree
         if: success()
         env:
@@ -98,12 +117,14 @@ jobs:
         run: |
           if [ -f stats_actions.csv ]; then
             echo "📤 Uploading stats_actions.csv..."
-            lftp -e "
-              set ftp:ssl-allow no;
-              open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-              put stats_actions.csv -o /htdocs/stats_actions.csv;
-              bye
-            "
+
+            lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" <<EOF
+set ftp:ssl-allow no
+set xfer:clobber on
+put stats_actions.csv -o /htdocs/stats_actions.csv
+bye
+EOF
+
           else
             echo "⚠️ stats_actions.csv not found"
           fi
