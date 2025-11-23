@@ -6,7 +6,7 @@ on:
       - main
 
   schedule:
-    - cron: "*/10 * * * *"   # Every 10 minutes
+    - cron: "*/10 * * * *"   # Run every 10 minutes
 
 jobs:
 
@@ -76,10 +76,9 @@ jobs:
         run: |
           echo "⬇️ Downloading logs.json..."
 
-          # remove old file to avoid "file exists" error
+          # Delete old file to avoid 'file exists' errors
           rm -f logs.json
 
-          # download with overwrite allowed
           lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" <<EOF
 set ftp:ssl-allow no
 set xfer:clobber on
@@ -87,9 +86,9 @@ get /htdocs/logs.json -o logs.json
 bye
 EOF
 
-          # If logs.json does not exist, create empty JSON array
+          # If logs.json not downloaded → create empty JSON
           if [ ! -f logs.json ]; then
-            echo "[]" > logs.json
+            echo "[]"> logs.json
           fi
 
       - name: Run MongoDB sync script
@@ -98,7 +97,7 @@ EOF
           MONGO_URI: ${{ secrets.MONGO_URI }}
         run: |
           if [ -z "$MONGO_URI" ]; then
-            echo '❌ MONGO_URI is not set'
+            echo "❌ MONGO_URI is not set"
             exit 1
           fi
 
@@ -117,14 +116,11 @@ EOF
         run: |
           if [ -f stats_actions.csv ]; then
             echo "📤 Uploading stats_actions.csv..."
-
             lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" <<EOF
 set ftp:ssl-allow no
-set xfer:clobber on
 put stats_actions.csv -o /htdocs/stats_actions.csv
 bye
 EOF
-
           else
             echo "⚠️ stats_actions.csv not found"
           fi
