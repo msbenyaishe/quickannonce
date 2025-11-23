@@ -11,8 +11,16 @@
       $stmt->execute([$email]);
       $admin = $stmt->fetch();
       if ($admin && (int)$admin['actif'] === 1 && password_verify($password, $admin['mot_de_passe'])) {
+        session_regenerate_id(true);
         $_SESSION['admin_id'] = (int)$admin['id'];
         $_SESSION['is_admin'] = true;
+        $_SESSION['username'] = $admin['email']; // Store email as username for logging
+        $_SESSION['role'] = 'admin';
+        
+        // Log admin login
+        require_once __DIR__ . '/includes/log_action.php';
+        log_action("connexion", ["user" => $admin['email'], "role" => "admin"]);
+        
         header('Location: index-admin.php');
         exit;
       }
