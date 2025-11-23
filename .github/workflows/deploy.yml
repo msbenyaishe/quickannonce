@@ -27,7 +27,7 @@ jobs:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
+          if [ -z "$FTP_HOST" ]  [ -z "$FTP_USER" ]  [ -z "$FTP_PASSWORD" ]; then
             echo "❌ FTP credentials missing."
             exit 1
           fi
@@ -50,11 +50,10 @@ jobs:
 
           echo "✅ Deployment completed"
 
-
   sync_mongodb:
     name: Sync logs.json → MongoDB
     runs-on: ubuntu-latest
-    needs: deploy_to_infinityfree   # run after deploy
+    needs: deploy_to_infinityfree
 
     steps:
       - name: Checkout repository
@@ -75,12 +74,22 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           echo "⬇️ Downloading logs.json..."
-          lftp -e "
-            set ftp:ssl-allow no;
-            open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-            get /htdocs/logs.json -o logs.json || echo '[]' > logs.json;
-            bye
-          "
+
+          # supprimer l'ancien fichier pour éviter l'erreur "file exists"
+          rm -f logs.json
+
+          # télécharger avec écrasement autorisé
+          lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" <<EOF
+set ftp:ssl-allow no
+set xfer:clobber on
+get /htdocs/logs.json -o logs.json
+bye
+EOF
+
+          # si le fichier n'existe pas après download → JSON vide
+          if [ ! -f logs.json ]; then
+            echo "[]"> logs.json
+          fi
 
       - name: Run MongoDB sync script
         env:
@@ -101,12 +110,11 @@ jobs:
         run: |
           if [ -f stats_actions.csv ]; then
             echo "📤 Uploading stats_actions.csv..."
-            lftp -e "
-              set ftp:ssl-allow no;
-              open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-              put stats_actions.csv -o /htdocs/stats_actions.csv;
-              bye
-            "
+            lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" <<EOF
+set ftp:ssl-allow no
+put stats_actions.csv -o /htdocs/stats_actions.csv
+bye
+EOF
           else
-            echo "⚠ stats_actions.csv not found"
+            echo "⚠️ stats_actions.csv not found"
           fi
