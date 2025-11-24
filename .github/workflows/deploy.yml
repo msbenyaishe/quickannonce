@@ -1,4 +1,4 @@
-name: Deploy to InfinityFree & Sync Logs
+name: Deploy & Sync Logs
 
 on:
   push:
@@ -25,26 +25,27 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "🚀 Starting deployment to InfinityFree..."
-          # Add your deployment commands here
-          # Example:
-          # lftp -c "set ssl:verify-certificate no; 
-          # open -u $FTP_USER,$FTP_PASS $FTP_HOST; 
-          # mirror -R ./ /htdocs/ --ignore-time --parallel=10 --exclude-glob .git* --exclude .github/"
+          lftp -c "
+            set ssl:verify-certificate no;
+            open -u $FTP_USER,$FTP_PASS $FTP_HOST;
+            mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/
+          "
+          echo "✅ Deployment completed"
 
       # --- Log Synchronization ---
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-      
+          python-version: '3.11'
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pymongo python-dotenv python-dateutil
-      
+          pip install pymongo pandas python-dotenv
+
       - name: Install FTP client
         run: sudo apt-get update && sudo apt-get install -y lftp
-      
+
       - name: Download logs.json
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
@@ -56,15 +57,13 @@ jobs:
             echo "[]" > logs.json
             echo "ℹ️ Created empty logs.json"
           fi
-      
+
       - name: Run log synchronization
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
-          MONGO_DB: ${{ secrets.MONGO_DB || 'quickannonces' }}
-          MONGO_COLLECTION: ${{ secrets.MONGO_COLLECTION || 'logs' }}
         run: |
           python sync_logs_to_mongo.py
-          
+
       - name: Upload updated files
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
