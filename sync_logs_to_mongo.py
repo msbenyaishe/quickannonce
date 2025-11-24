@@ -94,7 +94,7 @@ def export_full_collection(collection: Collection) -> None:
 def main() -> None:
     logs = load_logs()
     client = get_mongo_client()
-    db = client["stagiaires_admin"]
+    db = client["logs_db"]
     col = db["logs"]
 
     inserted = insert_logs(col, logs)
