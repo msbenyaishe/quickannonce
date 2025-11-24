@@ -1,16 +1,17 @@
 name: Deploy + Sync MongoDB
 
+env:
+  MONGO_URI: "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/logs_db?retryWrites=true&w=majority"
+
 on:
   push:
     branches:
       - main
-
   schedule:
-    - cron: "*/10 * * * *"   # Every 10 minutes
+    - cron: "*/10 * * * *"
 
 jobs:
-
-  deploy_to_infinityfree:
+  deploy:
     name: Deploy to InfinityFree
     runs-on: ubuntu-latest
 
@@ -19,112 +20,79 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install lftp
-        run: sudo apt-get update && sudo apt-get install -y lftp
-
-      - name: Deploy Files
-        env:
-          FTP_HOST: ${{ secrets.FTP_HOST }}
-          FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
-            echo "❌ FTP credentials missing."
-            exit 1
-          fi
+          sudo apt-get update
+          sudo apt-get install -y lftp
 
+      - name: Deploy via FTP
+        env:
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+        run: |
           echo "🚀 Deploying to InfinityFree..."
-
-          lftp -e "
-            set ftp:ssl-allow no;
-            set mirror:use-pget-n 2;
-            set net:timeout 60;
-
-            open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-
-            mirror -R -v --parallel=2 \
-              --exclude-glob .git/ \
-              --exclude-glob .github/ \
-              --exclude-glob .env \
-              --exclude-glob README.md \
-              ./ /htdocs/;
-
-            bye
-          "
-
-          echo "✅ Deployment completed"
-
+          lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; mirror -R ./ /htdocs/ --ignore-time --parallel=2"
+          echo "✅ Deployment done."
 
   sync_mongodb:
     name: Sync logs.json → MongoDB
     runs-on: ubuntu-latest
-    needs: deploy_to_infinityfree
+    needs: deploy
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Python + lftp
+      - name: Install Python dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 python3-pip lftp
-
-      - name: Install Python dependencies
-        run: pip install pymongo pandas dnspython python-dateutil
+          sudo apt-get install -y lftp python3 python3-pip
+          pip install pymongo pandas dnspython
 
       - name: Download logs.json from InfinityFree
         env:
-          FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          echo "⬇️ Downloading logs.json..."
-
-          lftp -e "
-            set ftp:ssl-allow no;
-            set xfer:clobber yes;
-
-            open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-
-            get /htdocs/logs.json -o logs.json \
-              || echo '[]' > logs.json;
-
-            bye
-          "
-
-      - name: Run MongoDB sync script
-        timeout-minutes: 10
-        env:
-          MONGO_URI: ${{ secrets.MONGO_URI }}
-        run: |
-          if [ -z "$MONGO_URI" ]; then
-            echo '❌ MONGO_URI is not set'
-            exit 1
+          echo "📥 Downloading logs.json..."
+          rm -f logs.json
+          if lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json"; then
+            echo "✅ logs.json downloaded."
+          else
+            echo "⚠ logs.json introuvable sur le serveur, création d'un fichier vide."
+            echo "[]" > logs.json
           fi
 
-          echo "🚀 Starting MongoDB sync..."
+      - name: Sync with MongoDB
+        run: |
+          echo "📡 Syncing logs to MongoDB..."
+          python3 sync_logs_to_mongo.py || (echo "❌ Sync failed" && exit 1)
 
-          python3 sync_logs_to_mongo.py || {
-            echo "❌ Sync failed, but continuing..."
-            exit 0
-          }
-
-      - name: Upload stats_actions.csv to InfinityFree
-        if: success()
+      - name: Upload stats_actions.csv
         env:
-          FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           if [ -f stats_actions.csv ]; then
             echo "📤 Uploading stats_actions.csv..."
-
-            lftp -e "
-              set ftp:ssl-allow no;
-              set xfer:clobber yes;
-              open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-              put stats_actions.csv -o /htdocs/stats_actions.csv;
-              bye
-            "
+            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put stats_actions.csv -o /htdocs/stats_actions.csv"
+            echo "✅ stats_actions.csv uploaded."
           else
-            echo "⚠️ stats_actions.csv not found"
+            echo "⚠ stats_actions.csv not found"
+          fi
+
+      - name: Upload logs.csv
+        env:
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+        run: |
+          if [ -f logs.csv ]; then
+            echo "📤 Uploading logs.csv..."
+            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put logs.csv -o /htdocs/logs.csv"
+            echo "✅ logs.csv uploaded."
+          else
+            echo "⚠ logs.csv not found"
           fi
