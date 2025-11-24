@@ -9,14 +9,19 @@ on:
 jobs:
   deploy-and-sync:
     runs-on: ubuntu-latest
+    env:
+      # Set default values for all steps
+      MONGO_DB: ${{ secrets.MONGO_DB || 'logs_db' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Install lftp at the beginning of the job
-      - name: Install FTP client
-        run: sudo apt-get update && sudo apt-get install -y lftp
+      # --- Install Dependencies ---
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
 
       # --- Deployment (only on push) ---
       - name: Deploy to InfinityFree
@@ -29,8 +34,16 @@ jobs:
           echo "🚀 Starting deployment to InfinityFree..."
           lftp -c "
             set ssl:verify-certificate no;
+            set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/
+            mirror -R ./ /htdocs/ \
+              --ignore-time \
+              --parallel=2 \
+              --exclude-glob .git* \
+              --exclude .github/ \
+              --exclude *.py \
+              --exclude *.md \
+              --exclude .gitignore
           "
           echo "✅ Deployment completed"
 
@@ -43,7 +56,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pymongo pandas python-dotenv
+          pip install -r requirements.txt  # Consider adding a requirements.txt
 
       - name: Download logs.json
         env:
@@ -52,16 +65,14 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "📥 Downloading logs.json..."
-          # Remove existing file if it exists
           rm -f logs.json
-          # Download the file with clobber enabled
           lftp -c "
             set ssl:verify-certificate no;
             set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
             get /htdocs/logs.json -o logs.json;
           " || true
-          # If download failed or file doesn't exist, create an empty one
+          
           if [ ! -f "logs.json" ]; then
             echo "[]" > logs.json
             echo "ℹ️ Created empty logs.json"
@@ -70,16 +81,24 @@ jobs:
       - name: Run log synchronization
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
+          # MONGO_DB is set at job level
         run: |
+          echo "🔌 Using MongoDB database: $MONGO_DB"
           python sync_logs_to_mongo.py
 
       - name: Upload updated files
+        if: always()  # Always run this step even if previous steps fail
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "📤 Uploading updated files..."
+          
+          # Create empty files if they don't exist
+          [ -f "logs.csv" ] || echo "No logs" > logs.csv
+          [ -f "stats_actions.csv" ] || echo "No stats" > stats_actions.csv
+          
           lftp -c "
             set ssl:verify-certificate no;
             set xfer:clobber on;
@@ -89,3 +108,9 @@ jobs:
             put -O /htdocs/ logs.json;
           "
           echo "✅ Files uploaded successfully"
+
+      - name: Clean up
+        if: always()
+        run: |
+          # Clean up sensitive files
+          rm -f logs.json logs.csv stats_actions.csv

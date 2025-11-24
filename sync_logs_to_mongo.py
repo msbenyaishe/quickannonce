@@ -11,22 +11,57 @@ Handles the full data cycle:
 import os
 import json
 import hashlib
+import sys
 import pandas as pd
-from pymongo import MongoClient
-from typing import List, Dict, Any
+from pymongo import MongoClient, errors
+from typing import List, Dict, Any, Optional
 
-# Get MongoDB URI from environment
+def verify_mongodb_connection(uri: str, db_name: str) -> tuple[Optional[MongoClient], Optional[Any], Optional[Any]]:
+    """Verify MongoDB connection and return client, db, and collection objects."""
+    try:
+        # Test connection with a short timeout
+        client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        
+        # Force connection to check if it's successful
+        client.server_info()
+        
+        # Get database and collection
+        db = client[db_name]
+        col = db["logs"]
+        
+        # Test a simple operation
+        col.count_documents({})
+        
+        print(f"✅ Successfully connected to MongoDB: {uri.split('@')[-1]}/{db_name}")
+        return client, db, col
+        
+    except errors.ServerSelectionTimeoutError:
+        print(f"❌ Failed to connect to MongoDB server: {uri}")
+        print("Please check your MONGO_URI and ensure the server is accessible")
+    except errors.ConfigurationError as e:
+        print(f"❌ Invalid MongoDB URI: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected error: {str(e)}")
+    
+    return None, None, None
+
+# Get MongoDB configuration from environment
 MONGO_URI = os.getenv("MONGO_URI")
 if not MONGO_URI:
-    raise ValueError("❌ MONGO_URI environment variable is required!")
+    print("❌ Error: MONGO_URI environment variable is required!")
+    sys.exit(1)
+
+# Get database name from environment or use default
+MONGO_DB = os.getenv("MONGO_DB", "logs_db")
+
+print(f"🔌 Attempting to connect to MongoDB database: {MONGO_DB}")
 
 def main():
-    # Connect to MongoDB
-    client = MongoClient(MONGO_URI)
-    # Use the database name from the connection string or fallback to 'quickannonces'
-    db_name = client.get_database().name or 'logs_db'
-    db = client[db_name]
-    col = db["logs"]  # Using 'logs' collection
+    # Verify and establish MongoDB connection
+    client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB)
+    if not all([client, db, col]):
+        print("❌ Exiting due to MongoDB connection issues")
+        return
 
     # --- Read logs.json ---
     if not os.path.exists("logs.json"):
