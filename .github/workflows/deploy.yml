@@ -2,23 +2,25 @@ name: Deploy & Sync Logs
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:  # Allow manual triggering
+    branches: [ main ]
   schedule:
-    - cron: "*/10 * * * *"  # Run every 10 minutes
+    - cron: '*/10 * * * *'  # Every 10 minutes
 
 jobs:
-  deploy_and_sync:
-    name: Deploy + Sync Logs
+  deploy-and-sync:
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      # --- Deployment to InfinityFree ---
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Install lftp at the beginning of the job
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      # --- Deployment (only on push) ---
       - name: Deploy to InfinityFree
-        if: github.event_name == 'push'  # Only run on push events
+        if: github.event_name == 'push'
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
@@ -43,9 +45,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pymongo pandas python-dotenv
 
-      - name: Install FTP client
-        run: sudo apt-get update && sudo apt-get install -y lftp
-
       - name: Download logs.json
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
@@ -53,7 +52,12 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "📥 Downloading logs.json..."
-          if ! lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json"; then
+          lftp -c "
+            set ssl:verify-certificate no;
+            open -u $FTP_USER,$FTP_PASS $FTP_HOST;
+            get /htdocs/logs.json -o logs.json || true
+          "
+          if [ ! -f "logs.json" ]; then
             echo "[]" > logs.json
             echo "ℹ️ Created empty logs.json"
           fi
