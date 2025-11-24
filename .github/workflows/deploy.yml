@@ -1,5 +1,8 @@
 name: Deploy + Sync MongoDB
 
+env:
+  MONGO_URI: "mongodb+srv://nticwork:YTpzileJtN8CLPoq@cluster0.pehxt.mongodb.net/stagiaires_admin?retryWrites=true&w=majority"
+
 on:
   push:
     branches:
@@ -12,8 +15,6 @@ jobs:
   deploy:
     name: Deploy to InfinityFree
     runs-on: ubuntu-latest
-    # Only run on push, not on schedule
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout repo
@@ -37,8 +38,8 @@ jobs:
   sync_mongodb:
     name: Sync logs.json → MongoDB
     runs-on: ubuntu-latest
-    # Always run on schedule, and also run after push (but independently of deploy)
-    # No deploy dependency anymore
+    needs: deploy
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -47,7 +48,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y lftp python3 python3-pip
-          pip install pymongo pandas dnspython python-dateutil
+          pip install pymongo pandas dnspython
 
       - name: Download logs.json from InfinityFree
         env:
@@ -57,14 +58,31 @@ jobs:
         run: |
           echo "📥 Downloading logs.json..."
           rm -f logs.json
-          lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json || echo '[]' > logs.json"
+          if lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json"; then
+            echo "✅ logs.json downloaded."
+          else
+            echo "⚠ logs.json introuvable sur le serveur, création d'un fichier vide."
+            echo "[]" > logs.json
+          fi
 
       - name: Sync with MongoDB
-        env:
-          MONGO_URI: ${{ secrets.MONGO_URI }}
         run: |
           echo "📡 Syncing logs to MongoDB..."
-          python3 sync_logs_to_mongo.py || echo '⚠ Sync failed but continuing.'
+          python3 sync_logs_to_mongo.py || echo "⚠ Sync failed but continuing."
+
+      - name: Upload stats_actions.csv
+        env:
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+        run: |
+          if [ -f stats_actions.csv ]; then
+            echo "📤 Uploading stats_actions.csv..."
+            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put stats_actions.csv -o /htdocs/stats_actions.csv"
+            echo "✅ Upload done."
+          else
+            echo "⚠ stats_actions.csv not found"
+          fi
 
       - name: Upload logs.csv
         env:

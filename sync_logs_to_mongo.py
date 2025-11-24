@@ -1,116 +1,91 @@
 #!/usr/bin/env python3
 """
-Sync logs from logs.json into MongoDB and export all MongoDB documents to logs.csv.
+Synchronize logs.json with MongoDB and export summaries.
 
-Usage:
-    python3 sync_logs_to_mongo.py
+The Mongo URI must be provided via the MONGO_URI environment variable.
 """
 
 import csv
+import hashlib
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List
 
-from bson import ObjectId
-from bson.errors import InvalidId
+import pandas as pd
 from pymongo import MongoClient
 from pymongo.collection import Collection
-from pymongo.errors import PyMongoError
 
 BASE_DIR = Path(_file_).resolve().parent
 LOG_FILE = BASE_DIR / "logs.json"
-CSV_FILE = BASE_DIR / "logs.csv"
-DEFAULT_URI = "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/"
-
-MONGO_URI = os.getenv("MONGO_URI", DEFAULT_URI)
-DB_NAME = "logs_db"
-COLLECTION_NAME = "logs"
+STATS_FILE = BASE_DIR / "stats_actions.csv"
+CSV_EXPORT = BASE_DIR / "logs.csv"
 
 
-def load_logs(path: Path) -> List[Dict[str, Any]]:
-    """Load log entries from logs.json."""
-    if not path.exists():
-        raise FileNotFoundError("logs.json not found in the current directory.")
-
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"logs.json contains invalid JSON: {exc}") from exc
-
-    if isinstance(payload, dict):
-        payload = [payload]
-
-    if isinstance(payload, dict):
-        payload = [payload]
-
-    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
-        raise ValueError("logs.json must contain an array of JSON objects.")
-
-    return payload
+def get_mongo_client() -> MongoClient:
+    uri = os.getenv("MONGO_URI")
+    if not uri:
+        raise ValueError("MONGO_URI manquante !")
+    return MongoClient(uri)
 
 
-def create_client(uri: str) -> MongoClient:
-    """Create and validate a MongoDB client."""
-    try:
-        client = MongoClient(
-            uri,
-            serverSelectionTimeoutMS=15000,
-            connectTimeoutMS=10000,
-            socketTimeoutMS=30000,
-        )
-        client.admin.command("ping")
-        return client
-    except PyMongoError as exc:
-        raise ConnectionError(f"Unable to connect to MongoDB: {exc}") from exc
+def load_logs() -> List[Dict[str, Any]]:
+    if not LOG_FILE.exists():
+        print("Aucun fichier logs.json trouvé.")
+        sys.exit(0)
 
+    with LOG_FILE.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
 
-def to_object_id(candidate: Any) -> Any:
-    """Convert string/dict representations of ObjectId to real ObjectId when possible."""
-    if isinstance(candidate, ObjectId):
-        return candidate
-    if isinstance(candidate, dict) and "$oid" in candidate:
-        candidate = candidate.get("$oid")
-    if isinstance(candidate, str):
-        try:
-            return ObjectId(candidate)
-        except InvalidId:
-            return candidate
-    return candidate
+    if not data:
+        print("Aucun log à insérer.")
+        sys.exit(0)
+
+    if isinstance(data, dict):
+        data = [data]
+
+    if not isinstance(data, list):
+        raise ValueError("Le fichier logs.json doit contenir un tableau d'objets JSON.")
+
+    return data
 
 
 def upsert_logs(collection: Collection, logs: List[Dict[str, Any]]) -> int:
-    """Insert or update log documents in MongoDB."""
-    inserted = 0
-    for idx, log in enumerate(logs, start=1):
-        doc = dict(log)
-        if "_id" in doc:
-            doc["_id"] = to_object_id(doc["_id"])
-        else:
-            doc["_id"] = ObjectId()
+    nb_inserts = 0
+    for log in logs:
+        raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
+        uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
+        log_with_id = {**log, "_id": uid}
 
-        try:
-            result = collection.replace_one({"_id": doc["_id"]}, doc, upsert=True)
-            if result.upserted_id is not None:
-                inserted += 1
-        except PyMongoError as exc:
-            raise RuntimeError(f"Failed to upsert log #{idx}: {exc}") from exc
+        result = collection.update_one(
+            {"_id": uid},
+            {"$setOnInsert": log_with_id},
+            upsert=True,
+        )
 
-    return inserted
+        if result.upserted_id is not None:
+            nb_inserts += 1
+
+    return nb_inserts
 
 
-def fetch_documents(collection: Collection) -> List[Dict[str, Any]]:
-    """Fetch every document from the MongoDB collection."""
-    try:
-        return list(collection.find())
-    except PyMongoError as exc:
-        raise RuntimeError(f"Failed to read documents from MongoDB: {exc}") from exc
+def export_stats(collection: Collection) -> None:
+    pipeline = [
+        {"$group": {"_id": "$action", "total": {"$sum": 1}}},
+        {"$sort": {"total": -1}},
+    ]
+    stats = list(collection.aggregate(pipeline))
+
+    if stats:
+        df = pd.DataFrame(stats).rename(columns={"_id": "action"})
+        df.to_csv(STATS_FILE, index=False)
+        print("Rapport d'analyse généré : stats_actions.csv")
+    else:
+        print("Aucune donnée pour générer le rapport stats_actions.csv.")
 
 
 def compute_fieldnames(records: Iterable[Dict[str, Any]]) -> List[str]:
-    """Determine CSV headers by preserving their first-seen order."""
     seen: List[str] = []
     for record in records:
         for key in record.keys():
@@ -120,60 +95,40 @@ def compute_fieldnames(records: Iterable[Dict[str, Any]]) -> List[str]:
 
 
 def normalize_value(value: Any) -> Any:
-    """Convert complex values into CSV-friendly strings."""
     if value is None:
         return ""
     if isinstance(value, (list, dict)):
         return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
+    return value
 
 
-def write_csv(records: List[Dict[str, Any]], path: Path) -> None:
-    """Write MongoDB documents to logs.csv with UTF-8 encoding."""
-    fieldnames = compute_fieldnames(records)
-    if not fieldnames:
-        # Fallback to a minimal header so the CSV is still valid.
-        fieldnames = ["_id"]
+def export_full_collection(collection: Collection) -> None:
+    docs = list(collection.find())
+    if not docs:
+        print("Aucun document trouvé dans MongoDB pour logs.csv.")
+        return
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+    headers = compute_fieldnames(docs)
+    with CSV_EXPORT.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=headers)
         writer.writeheader()
-        for record in records:
-            row = {field: normalize_value(record.get(field)) for field in fieldnames}
+        for doc in docs:
+            row = {field: normalize_value(doc.get(field)) for field in headers}
             writer.writerow(row)
+    print("Export complet généré : logs.csv")
 
 
 def main() -> None:
-    print("🔄 Starting log sync...")
-    client: Optional[MongoClient] = None
+    logs = load_logs()
+    client = get_mongo_client()
+    db = client["stagiaires_admin"]
+    col = db["logs"]
 
-    try:
-        logs = load_logs(LOG_FILE)
-        if logs:
-            print(f"📄 Loaded {len(logs)} log entries from logs.json")
-        else:
-            print("ℹ logs.json is empty. Skipping MongoDB inserts.")
+    inserted = upsert_logs(col, logs)
+    print(f"{inserted} nouveaux logs insérés dans MongoDB Atlas (sans doublons).")
 
-        client = create_client(MONGO_URI)
-        collection = client[DB_NAME][COLLECTION_NAME]
-        if logs:
-            inserted = upsert_logs(collection, logs)
-            print(f"✅ Inserted/updated {inserted} documents in MongoDB collection '{COLLECTION_NAME}'")
-
-        documents = fetch_documents(collection)
-        print(f"📥 Retrieved {len(documents)} documents from MongoDB")
-
-        write_csv(documents, CSV_FILE)
-        print(f"📁 Exported data to {CSV_FILE.resolve()}")
-    except Exception as exc:
-        print(f"❌ {exc}")
-        sys.exit(1)
-    finally:
-        if client is not None:
-            client.close()
-            print("🔌 MongoDB connection closed.")
+    export_stats(col)
+    export_full_collection(col)
 
 
 if _name_ == "_main_":
