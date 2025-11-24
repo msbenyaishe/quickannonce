@@ -68,7 +68,7 @@ jobs:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          echo "⬇ Downloading logs.json..."
+          echo "⬇️ Downloading logs.json..."
           lftp -e "
             set ftp:ssl-allow no;
             open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
@@ -89,21 +89,21 @@ jobs:
             echo "❌ Sync failed, but continuing..."
             exit 0  # Don't fail the workflow if sync fails
           }
-      - name: Upload logs.csv to InfinityFree
+      - name: Upload stats_actions.csv to InfinityFree
         if: success()
         env:
           FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          if [ -f logs.csv ]; then
-            echo "📤 Uploading logs.csv..."
+          if [ -f stats_actions.csv ]; then
+            echo "📤 Uploading stats_actions.csv..."
             lftp -e "
               set ftp:ssl-allow no;
               open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
-              put logs.csv -o /htdocs/logs.csv;
+              put stats_actions.csv -o /htdocs/stats_actions.csv;
               bye
             "
           else
-            echo "⚠ logs.csv not found"
+            echo "⚠️ stats_actions.csv not found"
           fi
