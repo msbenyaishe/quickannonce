@@ -1,181 +1,157 @@
-from pymongo import MongoClient 
-import os, json, pandas as pd 
-import hashlib 
+#!/usr/bin/env python3
+"""
+Sync logs from logs.json into MongoDB and export all MongoDB documents to logs.csv.
+
+Usage:
+    python3 sync_logs_to_mongo.py
+"""
+
+import csv
+import json
+import os
 import sys
-import signal
-from datetime import datetime
-from dateutil import tz
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
 
-# Set timeout handler to prevent infinite hangs (Unix/Linux only)
-TIMEOUT_ENABLED = False
-try:
-    def timeout_handler(signum, frame):
-        print("❌ Script timeout - taking too long!")
+from pymongo import MongoClient
+from pymongo.collection import Collection
+from pymongo.errors import BulkWriteError, PyMongoError
+
+BASE_DIR = Path(__file__).resolve().parent
+LOG_FILE = BASE_DIR / "logs.json"
+CSV_FILE = BASE_DIR / "logs.csv"
+DEFAULT_URI = "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/"
+
+MONGO_URI = os.getenv("MONGO_URI", DEFAULT_URI)
+DB_NAME = "logs_db"
+COLLECTION_NAME = "logs"
+
+
+def load_logs(path: Path) -> List[Dict[str, Any]]:
+    """Load log entries from logs.json."""
+    if not path.exists():
+        raise FileNotFoundError("logs.json not found in the current directory.")
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"logs.json contains invalid JSON: {exc}") from exc
+
+    if isinstance(payload, dict):
+        payload = [payload]
+
+    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+        raise ValueError("logs.json must contain an array of JSON objects.")
+
+    if not payload:
+        raise ValueError("logs.json does not contain any log entries.")
+
+    return payload
+
+
+def create_client(uri: str) -> MongoClient:
+    """Create and validate a MongoDB client."""
+    try:
+        client = MongoClient(
+            uri,
+            serverSelectionTimeoutMS=15000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=30000,
+        )
+        client.admin.command("ping")
+        return client
+    except PyMongoError as exc:
+        raise ConnectionError(f"Unable to connect to MongoDB: {exc}") from exc
+
+
+def insert_logs(collection: Collection, logs: List[Dict[str, Any]]) -> int:
+    """Insert log documents into MongoDB."""
+    if not logs:
+        return 0
+
+    try:
+        result = collection.insert_many(logs, ordered=False)
+        return len(result.inserted_ids)
+    except BulkWriteError as exc:
+        # Most common reason is duplicate keys; report partial success.
+        inserted = exc.details.get("nInserted", 0) if exc.details else 0
+        print(f"⚠️ Partial insert: {inserted} documents inserted, reason: {exc.details.get('writeErrors') if exc.details else exc}")
+        return inserted
+    except PyMongoError as exc:
+        raise RuntimeError(f"Failed to insert logs into MongoDB: {exc}") from exc
+
+
+def fetch_documents(collection: Collection) -> List[Dict[str, Any]]:
+    """Fetch every document from the MongoDB collection."""
+    try:
+        return list(collection.find())
+    except PyMongoError as exc:
+        raise RuntimeError(f"Failed to read documents from MongoDB: {exc}") from exc
+
+
+def compute_fieldnames(records: Iterable[Dict[str, Any]]) -> List[str]:
+    """Determine CSV headers by preserving their first-seen order."""
+    seen: List[str] = []
+    for record in records:
+        for key in record.keys():
+            if key not in seen:
+                seen.append(key)
+    return seen
+
+
+def normalize_value(value: Any) -> Any:
+    """Convert complex values into CSV-friendly strings."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def write_csv(records: List[Dict[str, Any]], path: Path) -> None:
+    """Write MongoDB documents to logs.csv with UTF-8 encoding."""
+    fieldnames = compute_fieldnames(records)
+    if not fieldnames:
+        # Fallback to a minimal header so the CSV is still valid.
+        fieldnames = ["_id"]
+
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            row = {field: normalize_value(record.get(field)) for field in fieldnames}
+            writer.writerow(row)
+
+
+def main() -> None:
+    print("🔄 Starting log sync...")
+    client: Optional[MongoClient] = None
+
+    try:
+        logs = load_logs(LOG_FILE)
+        print(f"📄 Loaded {len(logs)} log entries from logs.json")
+
+        client = create_client(MONGO_URI)
+        collection = client[DB_NAME][COLLECTION_NAME]
+        inserted = insert_logs(collection, logs)
+        print(f"✅ Inserted {inserted} new documents into MongoDB collection '{COLLECTION_NAME}'")
+
+        documents = fetch_documents(collection)
+        print(f"📥 Retrieved {len(documents)} documents from MongoDB")
+
+        write_csv(documents, CSV_FILE)
+        print(f"📁 Exported data to {CSV_FILE.resolve()}")
+    except Exception as exc:
+        print(f"❌ {exc}")
         sys.exit(1)
-    
-    if hasattr(signal, 'SIGALRM'):
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(300)  # 5 minutes max
-        TIMEOUT_ENABLED = True
-        print("⏱️ Timeout protection enabled (5 minutes)")
-except (AttributeError, OSError):
-    print("⚠️ Timeout protection not available on this platform")
-    TIMEOUT_ENABLED = False
+    finally:
+        if client is not None:
+            client.close()
+            print("🔌 MongoDB connection closed.")
 
-# Try to get MONGO_URI from environment variable first
-MONGO_URI = os.getenv("MONGO_URI")
 
-# If not set, use hardcoded URI as fallback
-if not MONGO_URI:
-    MONGO_URI = "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/"
-    print("⚠️ Using hardcoded MONGO_URI (environment variable not set)")
-else:
-    print("✓ Using MONGO_URI from environment variable")
-
-print("🔌 Connecting to MongoDB...")
-try:
-    # Reduced timeouts to fail faster
-    client = MongoClient(
-        MONGO_URI, 
-        serverSelectionTimeoutMS=15000,  # 15 seconds to find server
-        connectTimeoutMS=10000,  # 10 seconds to connect
-        socketTimeoutMS=30000,  # 30 seconds for operations
-        maxPoolSize=10
-    )
-    # Test connection with timeout
-    print("⏳ Testing connection...")
-    client.admin.command('ping')
-    print("✓ Connected to MongoDB successfully")
-except Exception as e:
-    print(f"❌ Failed to connect to MongoDB: {e}")
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(1)
-
-db = client["quickannonce_second"]
-col = db["users_second"]
-
-if not os.path.exists("logs.json"):
-    print("Aucun fichier logs.json trouvé.")
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(0)
-
-print("📖 Reading logs.json...")
-try:
-    with open("logs.json", "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        if not content or content == '[]':
-            print("Aucun log à insérer (fichier vide).")
-            if TIMEOUT_ENABLED:
-                signal.alarm(0)  # Cancel timeout
-            sys.exit(0)
-        data = json.loads(content)
-except json.JSONDecodeError as e:
-    print(f"❌ Erreur: logs.json n'est pas un JSON valide: {e}")
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(1)
-except Exception as e:
-    print(f"❌ Erreur lors de la lecture de logs.json: {e}")
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(1)
-
-if not data:
-    print("Aucun log à insérer.")
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(0)
-
-if not isinstance(data, list):
-    data = [data]
-
-print(f"📊 Found {len(data)} log entries to process...")
-
-# Timezone objects
-server_tz = tz.gettz("UTC")       # fallback if timestamp has no timezone
-morocco_tz = tz.gettz("Africa/Casablanca")
-
-nb_inserts = 0
-
-def convert_timestamp(ts_string):
-    """Convert timestamp from server timezone to Morocco timezone."""
-    try:
-        dt = datetime.fromisoformat(ts_string)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=server_tz)
-
-        dt_ma = dt.astimezone(morocco_tz)
-        return dt_ma.isoformat()
-
-    except Exception:
-        return ts_string  # if parsing fails, keep original
-
-try:
-    total = len(data)
-    print(f"🔄 Processing {total} logs...")
-    for idx, log in enumerate(data, 1):
-        if idx % 100 == 0 or idx == total:
-            print(f"  Progress: {idx}/{total} ({idx*100//total}%)")
-        
-        if "timestamp" in log:
-            log["timestamp"] = convert_timestamp(log["timestamp"])
-
-        raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
-        uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
-
-        log_with_id = {**log, "_id": uid}
-
-        try:
-            result = col.update_one(
-                {"_id": uid},
-                {"$setOnInsert": log_with_id},
-                upsert=True
-            )
-
-            if result.upserted_id is not None:
-                nb_inserts += 1
-        except Exception as e:
-            print(f"⚠️ Warning: Failed to insert log {idx}: {e}")
-            continue  # Skip this log and continue
-
-    print(f"✅ {nb_inserts} nouveaux logs insérés dans MongoDB Atlas (sans doublons).")
-except Exception as e:
-    print(f"❌ Error inserting logs: {e}")
-    import traceback
-    traceback.print_exc()
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(1)
-
-print("📈 Generating statistics...")
-try:
-    pipeline = [
-        {"$group": {"_id": "$action", "total": {"$sum": 1}}},
-        {"$sort": {"total": -1}}
-    ]
-    stats = list(col.aggregate(pipeline, allowDiskUse=True))
-    print(f"✓ Found {len(stats)} action types")
-except Exception as e:
-    print(f"❌ Error aggregating stats: {e}")
-    import traceback
-    traceback.print_exc()
-    if TIMEOUT_ENABLED:
-        signal.alarm(0)  # Cancel timeout
-    sys.exit(1)
-
-if stats:
-    try:
-        df = pd.DataFrame(stats).rename(columns={"_id": "action"})
-        df.to_csv("stats_actions.csv", index=False)
-        print("✅ Rapport d'analyse généré : stats_actions.csv")
-    except Exception as e:
-        print(f"⚠️ Warning: Failed to generate CSV: {e}")
-else:
-    print("⚠️ Aucune donnée pour générer le rapport stats_actions.csv.")
-
-# Cancel timeout on successful completion
-if TIMEOUT_ENABLED:
-    signal.alarm(0)
-print("✅ Sync completed successfully!")
+if __name__ == "__main__":
+    main()

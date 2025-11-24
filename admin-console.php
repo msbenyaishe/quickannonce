@@ -254,101 +254,63 @@
       <?php endif; ?>
     </div>
     
-    <!-- LOG-BASED STATISTICS FROM logs.json -->
+    <!-- LOG-BASED STATISTICS FROM logs.csv -->
     <div class="section-title" style="margin-top:32px;">
       <h2>Activity Analytics (User Actions)</h2>
-      <p class="muted">Real-time data from logs.json</p>
+      <p class="muted">Data exported from MongoDB (logs.csv)</p>
     </div>
 
     <div class="recent-list">
-<?php 
-$logsFile = __DIR__ . "/logs.json";
-$actionStats = [
-    'connexion' => 0,
-    'deconnexion' => 0,
-    'creation_annonce' => 0,
-    'suppression_annonce' => 0
-];
+<?php
+$csvPath = __DIR__ . "/logs.csv";
 
-if (file_exists($logsFile)) {
-    $logsContent = file_get_contents($logsFile);
-    if ($logsContent && $logsContent !== '[]') {
-        $logs = json_decode($logsContent, true);
-        if (is_array($logs)) {
-            foreach ($logs as $log) {
-                $action = $log['action'] ?? '';
-                if (isset($actionStats[$action])) {
-                    $actionStats[$action]++;
-                }
+if (!file_exists($csvPath)) {
+    echo "<div class='muted'>No log data available.</div>";
+} else {
+    $logsHeader = [];
+    $logsRows = [];
+    if (($handle = fopen($csvPath, 'r')) !== false) {
+        if (($logsHeader = fgetcsv($handle)) !== false) {
+            while (($row = fgetcsv($handle)) !== false) {
+                $logsRows[] = $row;
             }
         }
+        fclose($handle);
     }
-}
 
-$totalActions = array_sum($actionStats);
+    if (empty($logsHeader)) {
+        echo "<div class='muted'>No log data available.</div>";
+    } else {
 ?>
-    <?php if ($totalActions > 0): ?>
-    <div class="stats-grid" style="margin-bottom: 20px;">
-      <article class="stat-card stat-approved">
-        <div class="stat-label">Total Logins</div>
-        <div class="stat-value"><?php echo (int)$actionStats['connexion']; ?></div>
-      </article>
-      <article class="stat-card stat-rejected">
-        <div class="stat-label">Total Logouts</div>
-        <div class="stat-value"><?php echo (int)$actionStats['deconnexion']; ?></div>
-      </article>
-      <article class="stat-card stat-pending">
-        <div class="stat-label">Ads Created</div>
-        <div class="stat-value"><?php echo (int)$actionStats['creation_annonce']; ?></div>
-      </article>
-      <article class="stat-card stat-rejected">
-        <div class="stat-label">Ads Deleted</div>
-        <div class="stat-value"><?php echo (int)$actionStats['suppression_annonce']; ?></div>
-      </article>
-    </div>
-    
     <table class="table table-bordered table-hover">
       <thead class="table-dark">
         <tr>
-          <th>Action</th>
-          <th>Count</th>
+          <?php foreach ($logsHeader as $col): ?>
+            <th><?= h($col); ?></th>
+          <?php endforeach; ?>
         </tr>
       </thead>
       <tbody>
+        <?php if (empty($logsRows)): ?>
         <tr>
-          <td><strong>Connexion (Login)</strong></td>
-          <td><?php echo (int)$actionStats['connexion']; ?></td>
+          <td colspan="<?= count($logsHeader); ?>">No log entries recorded yet.</td>
         </tr>
-        <tr>
-          <td><strong>Déconnexion (Logout)</strong></td>
-          <td><?php echo (int)$actionStats['deconnexion']; ?></td>
-        </tr>
-        <tr>
-          <td><strong>Création Annonce (Ad Created)</strong></td>
-          <td><?php echo (int)$actionStats['creation_annonce']; ?></td>
-        </tr>
-        <tr>
-          <td><strong>Suppression Annonce (Ad Deleted)</strong></td>
-          <td><?php echo (int)$actionStats['suppression_annonce']; ?></td>
-        </tr>
-        <tr style="background-color: #f9fafb; font-weight: bold;">
-          <td><strong>Total Actions</strong></td>
-          <td><strong><?php echo (int)$totalActions; ?></strong></td>
-        </tr>
+        <?php else: ?>
+          <?php foreach ($logsRows as $row): ?>
+          <tr>
+            <?php foreach ($logsHeader as $index => $col): ?>
+            <td><?= h($row[$index] ?? ''); ?></td>
+            <?php endforeach; ?>
+          </tr>
+          <?php endforeach; ?>
+        <?php endif; ?>
       </tbody>
     </table>
-    <p class="muted text-end">Last updated: <?= file_exists($logsFile) ? date("d/m/Y H:i:s", filemtime($logsFile)) : "Never"; ?></p>
-    <?php else: ?>
-    <div class="muted">
-      <p>No activity logs found. Actions will appear here after:</p>
-      <ul style="margin-top: 10px; padding-left: 20px;">
-        <li>User login/logout</li>
-        <li>Ad creation</li>
-        <li>Ad deletion</li>
-      </ul>
-      <p style="margin-top: 10px;"><strong>Note:</strong> Make sure logs.json file is writable on the server.</p>
-    </div>
-    <?php endif; ?>
+    <p class="muted text-end">Last updated: <?= date("d/m/Y H:i:s", filemtime($csvPath)); ?></p>
+<?php
+    }
+}
+?>
     </div>
 
     <!-- MongoDB SYNC STATISTICS (from stats_actions.csv) -->
