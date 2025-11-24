@@ -30,7 +30,7 @@ STATS_CSV = BASE_DIR / "stats_actions.csv"
 # DEFAULT_URI is only a fallback — do NOT hardcode credentials in repo, store in GitHub secrets
 DEFAULT_URI = os.getenv("DEFAULT_MONGO_URI", "")
 
-MONGO_URI = os.getenv("mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/?appName=Cluster0", DEFAULT_URI)
+MONGO_URI = os.getenv("MONGO_URI", DEFAULT_URI)
 if not MONGO_URI:
     print("❌ MONGO_URI is not set. Set the MONGO_URI environment variable (use GitHub Secrets).")
     sys.exit(2)
