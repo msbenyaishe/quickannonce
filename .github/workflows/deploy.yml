@@ -68,7 +68,7 @@ jobs:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          echo "⬇️ Downloading logs.json..."
+          echo "⬇ Downloading logs.json..."
           lftp -e "
             set ftp:ssl-allow no;
             open -u $FTP_USER,$FTP_PASSWORD $FTP_HOST;
@@ -105,5 +105,5 @@ jobs:
               bye
             "
           else
-            echo "⚠️ logs.csv not found"
+            echo "⚠ logs.csv not found"
           fi
