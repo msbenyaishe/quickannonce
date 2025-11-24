@@ -12,6 +12,7 @@ import os
 import json
 import hashlib
 import sys
+import argparse
 import pandas as pd
 from pymongo import MongoClient, errors
 from typing import List, Dict, Any, Optional
@@ -56,7 +57,14 @@ MONGO_DB = os.getenv("MONGO_DB", "logs_db")
 
 print(f"🔌 Attempting to connect to MongoDB database: {MONGO_DB}")
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Sync logs to MongoDB')
+    parser.add_argument('--no-clear', action='store_true', 
+                       help='Do not clear logs after processing')
+    return parser.parse_args()
+
 def main():
+    args = parse_arguments()
     # Verify and establish MongoDB connection
     client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB)
     if None in (client, db, col):
@@ -68,7 +76,8 @@ def main():
         print("ℹ️ No logs.json file found.")
         return
 
-    with open("logs.json", "r", encoding="utf-8") as f:
+    print("📄 Reading logs.json...")
+    with open("logs.json", "r+", encoding="utf-8") as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError:
@@ -104,6 +113,13 @@ def main():
             inserted_count += 1
 
     print(f"✅ {inserted_count} new logs inserted into MongoDB (no duplicates)")
+
+    # Clear the file if --no-clear is not set
+    if not args.no_clear:
+        print("🧹 Clearing logs.json after successful processing")
+        f.seek(0)
+        f.truncate()
+        json.dump([], f)
 
     # --- Generate stats ---
     pipeline = [

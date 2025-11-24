@@ -71,9 +71,31 @@ jobs:
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
           MONGO_DB: ${{ secrets.MONGO_DB || 'logs_db' }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "🔌 Using MongoDB database: ${{ secrets.MONGO_DB || 'logs_db' }}"
-          python sync_logs_to_mongo.py
+          # First run: Process logs and keep them in the file
+          python sync_logs_to_mongo.py --no-clear
+          
+          # Verify logs were processed
+          if [ -s "logs.json" ]; then
+            echo "✅ Logs processed successfully"
+          else
+            echo "ℹ️ No logs to process"
+          fi
+          
+          # Clear the file for the next run
+          echo "[]" > logs.json
+          
+          # Upload the cleared file
+          echo "📤 Uploading cleared logs.json..."
+          lftp -c "
+            set ssl:verify-certificate no;
+            open -u $FTP_USER,$FTP_PASS $FTP_HOST;
+            put -O /htdocs/ logs.json;
+          "
 
       - name: Upload updated files
         env:
