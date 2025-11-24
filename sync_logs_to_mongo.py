@@ -35,9 +35,8 @@ if not MONGO_URI:
     print("❌ MONGO_URI is not set. Set the MONGO_URI environment variable (use GitHub Secrets).")
     sys.exit(2)
 
-DB_NAME = os.getenv("MONGO_DB", "logs_db")
-COLLECTION_NAME = os.getenv("MONGO_COLLECTION", "logs")
-
+DB_NAME = os.getenv("MONGO_DB") or "logs_db"
+COLLECTION_NAME = os.getenv("MONGO_COLLECTION") or "logs"
 
 # --- Helpers ---------------------------------------------------------------
 def load_logs(path: Path) -> List[Dict[str, Any]]:
