@@ -18,8 +18,8 @@ if not MONGO_URI:
     print("❌ MONGO_URI manquante !")
     sys.exit(1)
 
-DB_NAME = os.getenv("MONGO_DB", "logs_db")
-COLLECTION_NAME = os.getenv("MONGO_COLLECTION", "logs")
+DB_NAME = os.getenv("MONGO_DB") or "stagiaires_admin"
+COLLECTION_NAME = os.getenv("MONGO_COLLECTION") or "logs"
 
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "logs.json"
