@@ -78,28 +78,26 @@ jobs:
         id: sync-logs
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
-          MONGO_DB: ${{ secrets.MONGO_DB }}
-          MONGO_COLLECTION: ${{ secrets.MONGO_COLLECTION }}
-          FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
-          FTP_HOST: ${{ secrets.FTP_HOST }}
+          MONGO_DB: ${{ secrets.MONGO_DB || 'logs_db' }}
         run: |
-          echo "🔌 Using MongoDB database: ${MONGO_DB}"
+          echo "🔌 Using MongoDB database: ${{ secrets.MONGO_DB || 'logs_db' }}"
           
           # First, verify we can connect to MongoDB
-          python - <<'EOF'
+          if ! python -c "
 import os, sys
 from pymongo import MongoClient
-
-mongo_uri = os.getenv("MONGO_URI")
 try:
-    client = MongoClient(mongo_uri)
+    client = MongoClient(os.getenv('MONGO_URI'))
     client.server_info()  # Will throw if can't connect
-    print("✅ Successfully connected to MongoDB")
+    print('✅ Successfully connected to MongoDB')
+    sys.exit(0)
 except Exception as e:
-    print(f"❌ Failed to connect to MongoDB: {str(e)}")
+    print(f'❌ Failed to connect to MongoDB: {str(e)}')
     sys.exit(1)
-EOF
+          "; then
+              echo "❌ MongoDB connection failed, skipping log sync"
+              exit 1
+          fi
           
           # Process logs but don't clear the file yet
           if ! python sync_logs_to_mongo.py --no-clear; then
@@ -149,10 +147,6 @@ EOF
 
       - name: Cleanup on failure
         if: failure()
-        env:
-          FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
-          FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "⚠️ Workflow failed, restoring logs.json from backup if available"
           if [ -f "logs_backup.json" ]; then
