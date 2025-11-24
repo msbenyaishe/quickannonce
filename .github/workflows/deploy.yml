@@ -1,113 +1,82 @@
-name: Deploy + Sync MongoDB
+name: Deploy to InfinityFree & Sync Logs
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:  # Allow manual triggering
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/10 * * * *"  # Run every 10 minutes
 
 jobs:
-  sync_and_deploy:
-    name: Sync logs.json → MongoDB → CSV → upload
+  deploy_and_sync:
+    name: Deploy + Sync Logs
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install tools (lftp, python deps)
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y lftp python3 python3-pip
-          python3 -m pip install --upgrade pip
-          pip install pymongo dnspython
-
-      - name: Download logs.json from InfinityFree (create empty if missing)
+      # --- Deployment to InfinityFree ---
+      - name: Deploy to InfinityFree
+        if: github.event_name == 'push'  # Only run on push events
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          echo "📥 Downloading /htdocs/logs.json from $FTP_HOST..."
-          rm -f logs.json
-          if lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json"; then
-            echo "✅ logs.json downloaded."
-          else
-            echo "⚠ logs.json not found on server. Creating empty logs.json with []"
+          echo "🚀 Starting deployment to InfinityFree..."
+          # Add your deployment commands here
+          # Example:
+          # lftp -c "set ssl:verify-certificate no; 
+          # open -u $FTP_USER,$FTP_PASS $FTP_HOST; 
+          # mirror -R ./ /htdocs/ --ignore-time --parallel=10 --exclude-glob .git* --exclude .github/"
+
+      # --- Log Synchronization ---
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pymongo python-dotenv python-dateutil
+      
+      - name: Install FTP client
+        run: sudo apt-get update && sudo apt-get install -y lftp
+      
+      - name: Download logs.json
+        env:
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+        run: |
+          echo "📥 Downloading logs.json..."
+          if ! lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json"; then
             echo "[]" > logs.json
+            echo "ℹ️ Created empty logs.json"
           fi
-          echo "---- logs.json preview ----"
-          head -c 800 logs.json || true
-          echo
-          ls -l logs.json
-
-      - name: Check MONGO_URI secret is present
+      
+      - name: Run log synchronization
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB: ${{ secrets.MONGO_DB || 'quickannonces' }}
+          MONGO_COLLECTION: ${{ secrets.MONGO_COLLECTION || 'logs' }}
         run: |
-          if [ -z "$MONGO_URI" ]; then
-            echo "❌ MONGO_URI is empty or not available to this run."
-            exit 1
-          else
-            echo "✅ MONGO_URI present (length=${#MONGO_URI})."
-          fi
-
-      - name: Validate logs.json format
-        run: |
-          if [ -s logs.json ]; then
-            python3 -m json.tool logs.json >/dev/null || (echo "❌ logs.json is invalid JSON" && exit 1)
-            echo "✅ logs.json is valid JSON"
-          else
-            echo "⚠ logs.json is empty (allowed)"
-          fi
-
-      - name: Sync with MongoDB (run Python)
-        env:
-          MONGO_URI: ${{ secrets.MONGO_URI }}
-          MONGO_DB: ${{ secrets.MONGO_DB }}
-          MONGO_COLLECTION: ${{ secrets.MONGO_COLLECTION }}
-        run: |
-          echo "📡 Syncing logs to MongoDB..."
-          python3 sync_logs_to_mongo.py || (echo "❌ Sync failed" && exit 1)
-
-      - name: Upload logs.csv to server
+          python sync_logs_to_mongo.py
+          
+      - name: Upload updated files
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          if [ -f logs.csv ]; then
-            echo "📤 Uploading logs.csv..."
-            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put logs.csv -o /htdocs/logs.csv"
-            echo "✅ logs.csv uploaded."
-          else
-            echo "⚠ logs.csv not found, skipping upload"
-          fi
-
-      - name: Upload stats_actions.csv to server
-        env:
-          FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
-          FTP_HOST: ${{ secrets.FTP_HOST }}
-        run: |
-          if [ -f stats_actions.csv ]; then
-            echo "📤 Uploading stats_actions.csv..."
-            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put stats_actions.csv -o /htdocs/stats_actions.csv"
-            echo "✅ stats_actions.csv uploaded."
-          else
-            echo "⚠ stats_actions.csv not found, skipping upload"
-          fi
-
-      - name: Upload cleared logs.json back to server (keep admin-console in sync)
-        env:
-          FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
-          FTP_HOST: ${{ secrets.FTP_HOST }}
-        run: |
-          if [ -f logs.json ]; then
-            echo "📤 Uploading logs.json (should be cleared to [] )..."
-            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put logs.json -o /htdocs/logs.json"
-            echo "✅ logs.json uploaded."
-          else
-            echo "⚠ logs.json not found, skipping upload"
-          fi
+          echo "📤 Uploading updated files..."
+          lftp -c "
+            set ssl:verify-certificate no;
+            open -u $FTP_USER,$FTP_PASS $FTP_HOST;
+            put -O /htdocs/ logs.csv;
+            put -O /htdocs/ stats_actions.csv;
+            put -O /htdocs/ logs.json;
+          "
+          echo "✅ Files uploaded successfully"
