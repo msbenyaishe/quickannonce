@@ -15,9 +15,9 @@ import sys
 import argparse
 import pandas as pd
 from pymongo import MongoClient, errors
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
-def verify_mongodb_connection(uri: str, db_name: str) -> tuple[Optional[MongoClient], Optional[Any], Optional[Any]]:
+def verify_mongodb_connection(uri: str, db_name: str, collection_name: str) -> Tuple[Optional[MongoClient], Optional[Any], Optional[Any]]:
     """Verify MongoDB connection and return client, db, and collection objects."""
     try:
         # Test connection with a short timeout
@@ -28,12 +28,12 @@ def verify_mongodb_connection(uri: str, db_name: str) -> tuple[Optional[MongoCli
         
         # Get database and collection
         db = client[db_name]
-        col = db["logs"]
+        col = db[collection_name]
         
         # Test a simple operation
         col.count_documents({})
         
-        print(f"✅ Successfully connected to MongoDB: {uri.split('@')[-1]}/{db_name}")
+        print(f"✅ Successfully connected to MongoDB: {uri.split('@')[-1]}/{db_name}/{collection_name}")
         return client, db, col
         
     except errors.ServerSelectionTimeoutError:
@@ -46,18 +46,8 @@ def verify_mongodb_connection(uri: str, db_name: str) -> tuple[Optional[MongoCli
     
     return None, None, None
 
-# Get MongoDB configuration from environment
-MONGO_URI = os.getenv("MONGO_URI")
-if not MONGO_URI:
-    print("❌ Error: MONGO_URI environment variable is required!")
-    sys.exit(1)
-
-# Get database name from environment or use default
-MONGO_DB = os.getenv("MONGO_DB", "logs_db")
-
-print(f"🔌 Attempting to connect to MongoDB database: {MONGO_DB}")
-
 def parse_arguments():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Sync logs to MongoDB')
     parser.add_argument('--no-clear', action='store_true', 
                        help='Do not clear logs after processing')
@@ -65,8 +55,21 @@ def parse_arguments():
 
 def main():
     args = parse_arguments()
+    
+    # Get MongoDB configuration from environment
+    MONGO_URI = os.getenv("MONGO_URI")
+    if not MONGO_URI:
+        print("❌ Error: MONGO_URI environment variable is required!")
+        sys.exit(1)
+
+    # Get database and collection names from environment with defaults
+    MONGO_DB = os.getenv("MONGO_DB", "logs_db")
+    MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "logs")
+
+    print(f"🔌 Attempting to connect to MongoDB: {MONGO_DB}.{MONGO_COLLECTION}")
+    
     # Verify and establish MongoDB connection
-    client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB)
+    client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB, MONGO_COLLECTION)
     if None in (client, db, col):
         print("❌ Exiting due to MongoDB connection issues")
         return
@@ -84,42 +87,42 @@ def main():
             print("❌ Error: logs.json is not valid JSON")
             return
 
-    if not data:
-        print("ℹ️ No logs to process.")
-        return
+        if not data:
+            print("ℹ️ No logs to process.")
+            return
 
-    # Ensure data is a list
-    if isinstance(data, dict):
-        data = [data]
+        # Ensure data is a list
+        if isinstance(data, dict):
+            data = [data]
 
-    # --- Insert into MongoDB without duplicates ---
-    inserted_count = 0
-    for log in data:
-        # Generate unique ID based on log content
-        raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
-        uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
-        
-        # Add ID to log
-        log_with_id = {**log, "_id": uid}
-        
-        # Insert if not exists
-        result = col.update_one(
-            {"_id": uid},
-            {"$setOnInsert": log_with_id},
-            upsert=True
-        )
-        
-        if result.upserted_id is not None:
-            inserted_count += 1
+        # --- Insert into MongoDB without duplicates ---
+        inserted_count = 0
+        for log in data:
+            # Generate unique ID based on log content
+            raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
+            uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
+            
+            # Add ID to log
+            log_with_id = {**log, "_id": uid}
+            
+            # Insert if not exists
+            result = col.update_one(
+                {"_id": uid},
+                {"$setOnInsert": log_with_id},
+                upsert=True
+            )
+            
+            if result.upserted_id is not None:
+                inserted_count += 1
 
-    print(f"✅ {inserted_count} new logs inserted into MongoDB (no duplicates)")
+        print(f"✅ {inserted_count} new logs inserted into MongoDB (no duplicates)")
 
-    # Clear the file if --no-clear is not set
-    if not args.no_clear:
-        print("🧹 Clearing logs.json after successful processing")
-        f.seek(0)
-        f.truncate()
-        json.dump([], f)
+        # Clear the file if --no-clear is not set
+        if not args.no_clear:
+            print("🧹 Clearing logs.json after successful processing")
+            f.seek(0)
+            f.truncate()
+            json.dump([], f)
 
     # --- Generate stats ---
     pipeline = [
