@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '*/10 * * * *'  # Every 10 minutes
+    - cron: '*/10 * * * *' # Every 10 minutes
 
 jobs:
   deploy-and-sync:
@@ -14,28 +14,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Install lftp at the beginning of the job
+      # Install FTP client
       - name: Install FTP client
         run: sudo apt-get update && sudo apt-get install -y lftp
 
-      # --- Deployment (only on push) ---
-      - name: Deploy to InfinityFree
-        if: github.event_name == 'push'
-        env:
-          FTP_USER: ${{ secrets.FTP_USER }}
-          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
-          FTP_HOST: ${{ secrets.FTP_HOST }}
-        run: |
-          echo "🚀 Starting deployment to InfinityFree..."
-          lftp -c "
-            set ssl:verify-certificate no;
-            open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/
-          "
-          echo "✅ Deployment completed"
-
-      # --- Log Synchronization ---
-      - name: Set up Python
+      # Setup Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
@@ -45,117 +29,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install pymongo pandas python-dotenv
 
+      # Download logs.json from FTP
       - name: Download logs.json
-        id: download-logs
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          echo "📥 Downloading logs.json..."
-          # Create a backup of the current logs
-          lftp -c "
-            set ssl:verify-certificate no;
-            open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            get /htdocs/logs.json -o logs_backup.json || true
-          "
-          
-          # Download the main logs file
+          rm -f logs.json
           lftp -c "
             set ssl:verify-certificate no;
             set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            get /htdocs/logs.json -o logs.json;
-          " || true
-          
-          # If download failed, create an empty file
+            get /htdocs/logs.json -o logs.json || true;
+          "
           if [ ! -f "logs.json" ]; then
             echo "[]" > logs.json
-            echo "ℹ️ Created empty logs.json"
           fi
 
-      - name: Run log synchronization
-        id: sync-logs
+      # Run Python sync script
+      - name: Sync logs to MongoDB & generate CSVs
         env:
           MONGO_URI: ${{ secrets.MONGO_URI }}
-          MONGO_DB: ${{ secrets.MONGO_DB || 'logs_db' }}
+          MONGO_DB: ${{ secrets.MONGO_DB }}
+          MONGO_COLLECTION: logs
         run: |
-          echo "🔌 Using MongoDB database: ${{ secrets.MONGO_DB || 'logs_db' }}"
-          
-          # First, verify we can connect to MongoDB
-          if ! python -c "
-import os, sys
-from pymongo import MongoClient
-try:
-    client = MongoClient(os.getenv('MONGO_URI'))
-    client.server_info()  # Will throw if can't connect
-    print('✅ Successfully connected to MongoDB')
-    sys.exit(0)
-except Exception as e:
-    print(f'❌ Failed to connect to MongoDB: {str(e)}')
-    sys.exit(1)
-          "; then
-              echo "❌ MongoDB connection failed, skipping log sync"
-              exit 1
-          fi
-          
-          # Process logs but don't clear the file yet
-          if ! python sync_logs_to_mongo.py --no-clear; then
-              echo "❌ Log processing failed"
-              exit 1
-          fi
-          
-          # Clear the file only if processing was successful
-          echo "[]" > logs.json
-          echo "✅ Logs processed successfully"
+          python sync_logs_to_mongo.py
 
-      - name: Upload updated files
-        if: steps.sync-logs.outcome == 'success'
+      # Deploy all files including updated CSVs
+      - name: Deploy to InfinityFree
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          echo "📤 Uploading updated files..."
-          
-          # Upload logs.json (now empty)
+          echo "🚀 Deploying files..."
           lftp -c "
             set ssl:verify-certificate no;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            put -O /htdocs/ logs.json;
+            mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/
           "
-          
-          # Upload logs.csv if it exists
-          if [ -f "logs.csv" ]; then
-            lftp -c "
-              set ssl:verify-certificate no;
-              open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-              put -O /htdocs/ logs.csv;
-            "
-          fi
-          
-          # Upload stats_actions.csv if it exists
-          if [ -f "stats_actions.csv" ]; then
-            lftp -c "
-              set ssl:verify-certificate no;
-              open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-              put -O /htdocs/ stats_actions.csv;
-            "
-          fi
-          
-          echo "✅ Files uploaded successfully"
-
-      - name: Cleanup on failure
-        if: failure()
-        run: |
-          echo "⚠️ Workflow failed, restoring logs.json from backup if available"
-          if [ -f "logs_backup.json" ]; then
-            echo "🔄 Restoring logs.json from backup"
-            mv logs_backup.json logs.json
-            # Upload the restored logs.json
-            lftp -c "
-              set ssl:verify-certificate no;
-              open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-              put -O /htdocs/ logs.json;
-            "
-          fi
+          echo "✅ Deployment completed"
