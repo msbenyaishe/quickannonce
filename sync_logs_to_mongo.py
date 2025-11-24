@@ -59,7 +59,7 @@ print(f"🔌 Attempting to connect to MongoDB database: {MONGO_DB}")
 def main():
     # Verify and establish MongoDB connection
     client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB)
-    if not all([client, db, col]):
+    if None in (client, db, col):
         print("❌ Exiting due to MongoDB connection issues")
         return
 
