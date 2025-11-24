@@ -13,11 +13,13 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo import MongoClient
 from pymongo.collection import Collection
-from pymongo.errors import BulkWriteError, PyMongoError
+from pymongo.errors import PyMongoError
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(_file_).resolve().parent
 LOG_FILE = BASE_DIR / "logs.json"
 CSV_FILE = BASE_DIR / "logs.csv"
 DEFAULT_URI = "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/"
@@ -41,11 +43,11 @@ def load_logs(path: Path) -> List[Dict[str, Any]]:
     if isinstance(payload, dict):
         payload = [payload]
 
+    if isinstance(payload, dict):
+        payload = [payload]
+
     if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
         raise ValueError("logs.json must contain an array of JSON objects.")
-
-    if not payload:
-        raise ValueError("logs.json does not contain any log entries.")
 
     return payload
 
@@ -65,21 +67,38 @@ def create_client(uri: str) -> MongoClient:
         raise ConnectionError(f"Unable to connect to MongoDB: {exc}") from exc
 
 
-def insert_logs(collection: Collection, logs: List[Dict[str, Any]]) -> int:
-    """Insert log documents into MongoDB."""
-    if not logs:
-        return 0
+def to_object_id(candidate: Any) -> Any:
+    """Convert string/dict representations of ObjectId to real ObjectId when possible."""
+    if isinstance(candidate, ObjectId):
+        return candidate
+    if isinstance(candidate, dict) and "$oid" in candidate:
+        candidate = candidate.get("$oid")
+    if isinstance(candidate, str):
+        try:
+            return ObjectId(candidate)
+        except InvalidId:
+            return candidate
+    return candidate
 
-    try:
-        result = collection.insert_many(logs, ordered=False)
-        return len(result.inserted_ids)
-    except BulkWriteError as exc:
-        # Most common reason is duplicate keys; report partial success.
-        inserted = exc.details.get("nInserted", 0) if exc.details else 0
-        print(f"⚠️ Partial insert: {inserted} documents inserted, reason: {exc.details.get('writeErrors') if exc.details else exc}")
-        return inserted
-    except PyMongoError as exc:
-        raise RuntimeError(f"Failed to insert logs into MongoDB: {exc}") from exc
+
+def upsert_logs(collection: Collection, logs: List[Dict[str, Any]]) -> int:
+    """Insert or update log documents in MongoDB."""
+    inserted = 0
+    for idx, log in enumerate(logs, start=1):
+        doc = dict(log)
+        if "_id" in doc:
+            doc["_id"] = to_object_id(doc["_id"])
+        else:
+            doc["_id"] = ObjectId()
+
+        try:
+            result = collection.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+            if result.upserted_id is not None:
+                inserted += 1
+        except PyMongoError as exc:
+            raise RuntimeError(f"Failed to upsert log #{idx}: {exc}") from exc
+
+    return inserted
 
 
 def fetch_documents(collection: Collection) -> List[Dict[str, Any]]:
@@ -132,12 +151,16 @@ def main() -> None:
 
     try:
         logs = load_logs(LOG_FILE)
-        print(f"📄 Loaded {len(logs)} log entries from logs.json")
+        if logs:
+            print(f"📄 Loaded {len(logs)} log entries from logs.json")
+        else:
+            print("ℹ logs.json is empty. Skipping MongoDB inserts.")
 
         client = create_client(MONGO_URI)
         collection = client[DB_NAME][COLLECTION_NAME]
-        inserted = insert_logs(collection, logs)
-        print(f"✅ Inserted {inserted} new documents into MongoDB collection '{COLLECTION_NAME}'")
+        if logs:
+            inserted = upsert_logs(collection, logs)
+            print(f"✅ Inserted/updated {inserted} documents in MongoDB collection '{COLLECTION_NAME}'")
 
         documents = fetch_documents(collection)
         print(f"📥 Retrieved {len(documents)} documents from MongoDB")
@@ -153,5 +176,5 @@ def main() -> None:
             print("🔌 MongoDB connection closed.")
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
