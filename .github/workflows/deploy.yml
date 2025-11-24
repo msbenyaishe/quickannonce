@@ -1,7 +1,7 @@
 name: Deploy + Sync MongoDB
 
 env:
-  MONGO_URI: "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.pehxt.mongodb.net/stagiaires_admin?retryWrites=true&w=majority"
+  MONGO_URI: "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/?appName=Cluster0"
 
 on:
   push:
