@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -19,7 +20,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import MongoClient
 from pymongo.collection import Collection
-from pymongo.errors import PyMongoError
+from pymongo.errors import PyMongoError, DuplicateKeyError
 
 # --- Config / Paths --------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
@@ -86,45 +87,72 @@ def to_object_id(candidate: Any) -> Any:
     return candidate
 
 
+def compute_content_hash(doc: Dict[str, Any]) -> str:
+    """Compute a stable SHA256 hash for a document excluding its _id."""
+    d = dict(doc)  # copy
+    d.pop("_id", None)
+    # use compact separators and sorted keys for deterministic serialization
+    j = json.dumps(d, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(j.encode("utf-8")).hexdigest()
+
+
 def upsert_logs(collection: Collection, logs: List[Dict[str, Any]]) -> int:
     """
-    Insert or update log documents in MongoDB.
-    Returns number of documents inserted (new) or upserted.
+    Insert or update log documents in MongoDB, avoiding duplicates using a content_hash.
+    Returns number of documents newly inserted (not existing ones).
     """
     inserted_count = 0
     if not logs:
         return 0
 
-    # Partition logs into those with an _id and those without
-    docs_with_id = []
-    docs_without_id = []
+    # Ensure an index on content_hash to deduplicate by content
+    try:
+        collection.create_index([("content_hash", 1)], unique=True, background=True)
+    except PyMongoError:
+        # index creation failure is non-fatal; operations will still proceed
+        pass
 
-    for doc in logs:
-        d = dict(doc)  # copy
+    for raw in logs:
+        d = dict(raw)  # copy
+        content_hash = compute_content_hash(d)
+        d["content_hash"] = content_hash
+
+        # If an _id is present, try to replace by _id first
         if "_id" in d:
             d["_id"] = to_object_id(d["_id"])
-            docs_with_id.append(d)
+            try:
+                res = collection.replace_one({"_id": d["_id"]}, d, upsert=True)
+                if getattr(res, "upserted_id", None) is not None:
+                    inserted_count += 1
+            except DuplicateKeyError:
+                # content_hash unique collision: fall back to upsert by content_hash (merge)
+                try:
+                    res2 = collection.update_one(
+                        {"content_hash": content_hash},
+                        {"$set": d},
+                        upsert=True,
+                    )
+                    if getattr(res2, "upserted_id", None) is not None:
+                        inserted_count += 1
+                except PyMongoError as exc:
+                    raise RuntimeError(f"Failed to upsert document (by content_hash) after duplicate-key: {exc}") from exc
+            except PyMongoError as exc:
+                raise RuntimeError(f"Failed to upsert document with _id={d.get('_id')}: {exc}") from exc
         else:
-            docs_without_id.append(d)
-
-    # Replace existing docs (or upsert) for docs_with_id
-    for d in docs_with_id:
-        try:
-            result = collection.replace_one({"_id": d["_id"]}, d, upsert=True)
-            # if upserted_id is present, it's a new insert
-            if getattr(result, "upserted_id", None) is not None:
-                inserted_count += 1
-        except PyMongoError as exc:
-            raise RuntimeError(f"Failed to upsert document with _id={d.get('_id')}: {exc}") from exc
-
-    # Bulk insert docs_without_id
-    if docs_without_id:
-        try:
-            res = collection.insert_many(docs_without_id, ordered=False)
-            inserted_count += len(getattr(res, "inserted_ids", []))
-        except PyMongoError as exc:
-            # If insertion fails for some documents, raise with context
-            raise RuntimeError(f"Failed to insert documents: {exc}") from exc
+            # No _id — upsert based on content_hash so identical content is not duplicated
+            try:
+                res = collection.update_one(
+                    {"content_hash": content_hash},
+                    {"$setOnInsert": d},
+                    upsert=True,
+                )
+                if getattr(res, "upserted_id", None) is not None:
+                    inserted_count += 1
+            except DuplicateKeyError:
+                # Very rare race — treat as existing
+                pass
+            except PyMongoError as exc:
+                raise RuntimeError(f"Failed to insert document: {exc}") from exc
 
     return inserted_count
 
@@ -200,16 +228,21 @@ def main() -> None:
         collection = client[DB_NAME][COLLECTION_NAME]
 
         inserted = 0
+        sync_succeeded = False
         if logs:
             inserted = upsert_logs(collection, logs)
             print(f"✅ Inserted/Upserted {inserted} documents into MongoDB collection '{COLLECTION_NAME}'")
+            sync_succeeded = True
+        else:
+            print("ℹ️ No new logs to insert this run.")
 
-            # Only empty the logs.json if DB insert succeeded
+        # Only clear the logs.json if DB insert succeeded (or there were no logs)
+        # (this keeps remote empty after successful sync)
+        if sync_succeeded or not logs:
             try:
-                # atomic-ish write: write to temp and rename
                 tmp = LOG_FILE.with_suffix(".tmp")
                 tmp.write_text("[]", encoding="utf-8")
-                tmp.replace(LOG_FILE)  # atomic on most OSes
+                tmp.replace(LOG_FILE)
                 print(f"🧹 Cleared {LOG_FILE} (wrote empty array).")
             except Exception as exc:
                 print(f"⚠ Could not clear logs.json after DB insert: {exc}")

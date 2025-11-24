@@ -62,6 +62,20 @@ jobs:
             echo "[]" > logs.json
           fi
           ls -l logs.json
+          echo "---- preview ----"
+          head -c 500 logs.json || true
+          echo
+
+      - name: Check MONGO_URI secret is present
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+        run: |
+          if [ -z "$MONGO_URI" ]; then
+            echo "❌ MONGO_URI is empty or not available to this run."
+            exit 1
+          else
+            echo "✅ MONGO_URI present (length=${#MONGO_URI})."
+          fi
 
       - name: Sync with MongoDB (use secrets.MONGO_URI)
         env:
@@ -98,4 +112,18 @@ jobs:
             echo "✅ logs.csv uploaded."
           else
             echo "⚠ logs.csv not found"
+          fi
+
+      - name: Upload cleared logs.json (keep server in sync)
+        env:
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+        run: |
+          if [ -f logs.json ]; then
+            echo "📤 Uploading logs.json (cleared/updated)..."
+            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put logs.json -o /htdocs/logs.json"
+            echo "✅ logs.json uploaded."
+          else
+            echo "⚠ logs.json not found, skipping upload"
           fi
