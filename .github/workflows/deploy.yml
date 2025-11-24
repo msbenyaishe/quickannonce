@@ -12,6 +12,8 @@ jobs:
   deploy:
     name: Deploy to InfinityFree
     runs-on: ubuntu-latest
+    # Only run on push, not on schedule
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout repo
@@ -35,8 +37,8 @@ jobs:
   sync_mongodb:
     name: Sync logs.json → MongoDB
     runs-on: ubuntu-latest
-    needs: deploy
-
+    # Always run on schedule, and also run after push (but independently of deploy)
+    # No deploy dependency anymore
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -62,18 +64,18 @@ jobs:
           MONGO_URI: ${{ secrets.MONGO_URI }}
         run: |
           echo "📡 Syncing logs to MongoDB..."
-          python3 sync_logs_to_mongo.py || echo "⚠ Sync failed but continuing."
+          python3 sync_logs_to_mongo.py || echo '⚠ Sync failed but continuing.'
 
-      - name: Upload stats_actions.csv
+      - name: Upload logs.csv
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          if [ -f stats_actions.csv ]; then
-            echo "📤 Uploading stats_actions.csv..."
-            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put stats_actions.csv -o /htdocs/stats_actions.csv"
+          if [ -f logs.csv ]; then
+            echo "📤 Uploading logs.csv..."
+            lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; put logs.csv -o /htdocs/logs.csv"
             echo "✅ Upload done."
           else
-            echo "⚠ stats_actions.csv not found"
+            echo "⚠ logs.csv not found"
           fi
