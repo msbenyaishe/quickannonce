@@ -1,8 +1,5 @@
 name: Deploy + Sync MongoDB
 
-env:
-  MONGO_URI: "mongodb+srv://quick_user_second:DfhuouESRXAuoJ1d@cluster0.kr90782.mongodb.net/logs_db?retryWrites=true&w=majority"
-
 on:
   push:
     branches:
@@ -43,28 +40,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Python dependencies
+      - name: Install runtime / dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y lftp python3 python3-pip
-          pip install pymongo pandas dnspython
+          python3 -m pip install --upgrade pip
+          pip install pymongo dnspython
 
-      - name: Download logs.json from InfinityFree
+      - name: Download logs.json from InfinityFree (if not exist create empty)
         env:
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASSWORD }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
-          echo "📥 Downloading logs.json..."
+          echo "📥 Downloading /htdocs/logs.json..."
           rm -f logs.json
           if lftp -c "set ssl:verify-certificate no; open -u $FTP_USER,$FTP_PASS $FTP_HOST; get /htdocs/logs.json -o logs.json"; then
             echo "✅ logs.json downloaded."
           else
-            echo "⚠ logs.json introuvable sur le serveur, création d'un fichier vide."
+            echo "⚠ logs.json not found on server. Creating an empty logs.json with []"
             echo "[]" > logs.json
           fi
+          ls -l logs.json
 
-      - name: Sync with MongoDB
+      - name: Sync with MongoDB (use secrets.MONGO_URI)
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB: ${{ secrets.MONGO_DB }} # optional
+          MONGO_COLLECTION: ${{ secrets.MONGO_COLLECTION }} # optional
         run: |
           echo "📡 Syncing logs to MongoDB..."
           python3 sync_logs_to_mongo.py || (echo "❌ Sync failed" && exit 1)
