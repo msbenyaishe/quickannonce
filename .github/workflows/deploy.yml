@@ -2,7 +2,7 @@ name: Deploy & Sync Logs
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   schedule:
     - cron: '*/10 * * * *'  # Every 10 minutes
 
@@ -52,11 +52,16 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "📥 Downloading logs.json..."
+          # Remove existing file if it exists
+          rm -f logs.json
+          # Download the file with clobber enabled
           lftp -c "
             set ssl:verify-certificate no;
+            set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            get /htdocs/logs.json -o logs.json || true
-          "
+            get /htdocs/logs.json -o logs.json;
+          " || true
+          # If download failed or file doesn't exist, create an empty one
           if [ ! -f "logs.json" ]; then
             echo "[]" > logs.json
             echo "ℹ️ Created empty logs.json"
@@ -77,6 +82,7 @@ jobs:
           echo "📤 Uploading updated files..."
           lftp -c "
             set ssl:verify-certificate no;
+            set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
             put -O /htdocs/ logs.csv;
             put -O /htdocs/ stats_actions.csv;
