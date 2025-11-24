@@ -11,6 +11,7 @@ import hashlib
 import csv
 from pathlib import Path
 from pymongo import MongoClient
+from bson import ObjectId
 
 # --- Config ---
 MONGO_URI = os.getenv("MONGO_URI")
@@ -18,6 +19,7 @@ if not MONGO_URI:
     print("❌ MONGO_URI manquante !")
     sys.exit(1)
 
+# Use fallback if env var is missing or empty
 DB_NAME = os.getenv("MONGO_DB") or "stagiaires_admin"
 COLLECTION_NAME = os.getenv("MONGO_COLLECTION") or "logs"
 
@@ -28,27 +30,38 @@ STATS_CSV = BASE_DIR / "stats_actions.csv"
 
 # --- Connect to MongoDB ---
 print("🔗 Connecting to MongoDB Atlas...")
-client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=15000)
-db = client[DB_NAME]
-col = db[COLLECTION_NAME]
-
-# Validate connection
 try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=15000)
     client.admin.command("ping")
     print("✅ Connected to MongoDB Atlas.")
 except Exception as exc:
     print(f"❌ Connection failed: {exc}")
     sys.exit(1)
 
+db = client[DB_NAME]
+col = db[COLLECTION_NAME]
+
+# Diagnostics: masked URI and target DB/collection
+try:
+    masked = (MONGO_URI[:20] + "..." + MONGO_URI[-10:]) if len(MONGO_URI) > 40 else MONGO_URI
+except Exception:
+    masked = "<masked>"
+print(f"🔎 Target DB: {DB_NAME!r}, Collection: {COLLECTION_NAME!r}, MONGO_URI preview: {masked}")
+
 # --- Read logs.json ---
 print(f"📄 Reading {LOG_FILE}...")
 if not LOG_FILE.exists():
-    print(f"❌ File not found: {LOG_FILE}")
-    sys.exit(1)
+    print(f"⚠ {LOG_FILE} not found on runner — creating empty array to continue.")
+    try:
+        LOG_FILE.write_text("[]", encoding="utf-8")
+    except Exception as exc:
+        print(f"❌ Could not create {LOG_FILE}: {exc}")
+        sys.exit(1)
 
 try:
     with open(LOG_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        raw = f.read().strip()
+        data = json.loads(raw) if raw else []
 except json.JSONDecodeError as exc:
     print(f"❌ Invalid JSON in logs.json: {exc}")
     sys.exit(1)
@@ -61,26 +74,20 @@ if not data:
 if isinstance(data, dict):
     data = [data]
 
-print(f"📊 Found {len(data)} log entries.")
+print(f"📊 Found {len(data)} log entries to process.")
 
-# --- Insert into MongoDB WITHOUT duplicates ---
+# --- Insert into MongoDB WITHOUT duplicates (MD5 of sorted JSON as _id) ---
 nb_inserts = 0
-
 for log in data:
-    # Generate unique ID based on log content (MD5 hash)
-    raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
-    uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
-
-    # Insert with _id = hash (upsert avoids duplicates)
-    log_with_id = {**log, "_id": uid}
-    result = col.update_one(
-        {"_id": uid},
-        {"$setOnInsert": log_with_id},
-        upsert=True
-    )
-
-    if result.upserted_id is not None:
-        nb_inserts += 1
+    try:
+        raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
+        uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
+        log_with_id = {**log, "_id": uid}
+        res = col.update_one({"_id": uid}, {"$setOnInsert": log_with_id}, upsert=True)
+        if getattr(res, "upserted_id", None) is not None:
+            nb_inserts += 1
+    except Exception as exc:
+        print(f"⚠ Error inserting a log: {exc}")
 
 print(f"✅ {nb_inserts} new logs inserted into MongoDB (without duplicates).")
 
@@ -93,31 +100,58 @@ except Exception as exc:
 
 # --- Export all documents to CSV ---
 print("📤 Exporting all documents to CSV...")
-all_docs = list(col.find())
+try:
+    all_docs = list(col.find())
+except Exception as exc:
+    print(f"❌ Could not read documents from MongoDB: {exc}")
+    client.close()
+    sys.exit(1)
 
 if all_docs:
-    # Get fieldnames from first doc
-    fieldnames = list(all_docs[0].keys())
-    
+    # Determine headers: union of keys, preserve order by first-seen
+    seen = []
+    for d in all_docs:
+        for k in d.keys():
+            if k not in seen:
+                seen.append(k)
+    fieldnames = seen or ["_id"]
+
     with open(CSV_FILE, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for doc in all_docs:
-            # Convert ObjectId and other non-serializable types to string
-            row = {k: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v for k, v in doc.items()}
+            row = {}
+            for fn in fieldnames:
+                v = doc.get(fn)
+                if isinstance(v, (dict, list)):
+                    row[fn] = json.dumps(v, ensure_ascii=False)
+                elif isinstance(v, ObjectId):
+                    row[fn] = str(v)
+                elif v is None:
+                    row[fn] = ""
+                else:
+                    row[fn] = v
             writer.writerow(row)
-    
+
     print(f"✅ Exported {len(all_docs)} documents to {CSV_FILE}.")
 else:
-    print("⚠️ No documents in collection to export.")
+    # Ensure CSV exists (empty with header)
+    with open(CSV_FILE, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["_id"])
+    print("⚠️ No documents in collection to export; wrote empty CSV with header.")
 
 # --- Generate stats_actions.csv (count by action field) ---
 print("📊 Generating action statistics...")
-pipeline = [
-    {"$group": {"_id": "$action", "total": {"$sum": 1}}},
-    {"$sort": {"total": -1}}
-]
-stats = list(col.aggregate(pipeline))
+try:
+    pipeline = [
+        {"$group": {"_id": "$action", "total": {"$sum": 1}}},
+        {"$sort": {"total": -1}}
+    ]
+    stats = list(col.aggregate(pipeline))
+except Exception as exc:
+    print(f"⚠ Could not compute stats: {exc}")
+    stats = []
 
 if stats:
     with open(STATS_CSV, "w", encoding="utf-8", newline="") as f:
@@ -125,10 +159,13 @@ if stats:
         writer.writeheader()
         for stat in stats:
             writer.writerow({"action": stat["_id"], "total": stat["total"]})
-    
     print(f"✅ Stats report generated: {STATS_CSV}.")
 else:
-    print("⚠️ No data for stats_actions.csv.")
+    # write empty stats with header so admin page won't break
+    with open(STATS_CSV, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["action", "total"])
+    print("⚠️ No data for stats_actions.csv; wrote header-only file.")
 
 # --- Close connection ---
 client.close()
