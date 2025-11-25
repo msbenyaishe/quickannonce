@@ -18,13 +18,12 @@ from pymongo import MongoClient, errors
 from typing import Any, Optional, Tuple
 
 def verify_mongodb_connection(uri: str, db_name: str, collection_name: str) -> Tuple[Optional[MongoClient], Optional[Any], Optional[Any]]:
-    """Verify MongoDB connection and return client, db, and collection objects."""
     try:
         client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-        client.server_info()  # Force connection
+        client.server_info()
         db = client[db_name]
         col = db[collection_name]
-        col.count_documents({})  # Simple test
+        col.count_documents({})
         print(f"✅ Successfully connected to MongoDB: {db_name}.{collection_name}")
         return client, db, col
 
@@ -48,7 +47,12 @@ def main():
         print("❌ Error: MONGO_URI environment variable is required!")
         sys.exit(1)
 
-    MONGO_DB = os.getenv("MONGO_DB", "logs_db")
+    # ⭐ FIXED HERE ⭐
+    MONGO_DB = os.getenv("MONGO_DB")
+    if not MONGO_DB or MONGO_DB.strip() == "":
+        print("⚠️ MONGO_DB is empty. Using default: logs_db")
+        MONGO_DB = "logs_db"
+
     MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "logs")
 
     print(f"🔌 Connecting to MongoDB: {MONGO_DB}.{MONGO_COLLECTION}")
@@ -72,7 +76,6 @@ def main():
             print("❌ logs.json is not valid JSON")
             sys.exit(1)
 
-        # If logs.json is empty, still force DB creation
         if not data:
             print("ℹ️ logs.json is empty. Ensuring database/collection exists...")
             col.insert_one({"_init": True})
@@ -82,7 +85,6 @@ def main():
         if isinstance(data, dict):
             data = [data]
 
-        # Insert logs
         inserted_count = 0
         for log in data:
             raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
@@ -101,14 +103,12 @@ def main():
 
         print(f"✅ {inserted_count} new logs inserted (no duplicates)")
 
-        # Clear logs.json after processing
         if not args.no_clear:
             print("🧹 Clearing logs.json...")
             f.seek(0)
             f.truncate()
             json.dump([], f)
 
-    # Generate stats
     pipeline = [
         {"$group": {"_id": "$action", "total": {"$sum": 1}}},
         {"$sort": {"total": -1}}
@@ -122,7 +122,6 @@ def main():
     else:
         print("ℹ️ No stats to export")
 
-    # Export full logs
     all_logs = list(col.find({}, {"_id": 0}))
     if all_logs:
         pd.DataFrame(all_logs).to_csv("logs.csv", index=False)
