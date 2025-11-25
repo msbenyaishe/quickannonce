@@ -16,6 +16,24 @@ import argparse
 import pandas as pd
 from pymongo import MongoClient, errors
 from typing import Any, Optional, Tuple
+from datetime import datetime
+from dateutil import tz  # Added for timezone conversion
+
+# Morocco timezone
+morocco_tz = tz.gettz("Africa/Casablanca")
+server_tz = tz.gettz("UTC")  # fallback if timestamp has no timezone
+
+def convert_to_morocco(ts_string: str) -> str:
+    """Convert ISO timestamp string to Morocco timezone."""
+    try:
+        dt = datetime.fromisoformat(ts_string)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=server_tz)
+        dt_ma = dt.astimezone(morocco_tz)
+        return dt_ma.isoformat()
+    except Exception:
+        return ts_string  # if parsing fails, keep original
+
 
 def verify_mongodb_connection(uri: str, db_name: str, collection_name: str) -> Tuple[Optional[MongoClient], Optional[Any], Optional[Any]]:
     try:
@@ -47,7 +65,6 @@ def main():
         print("❌ Error: MONGO_URI environment variable is required!")
         sys.exit(1)
 
-    # ⭐ FIXED HERE ⭐
     MONGO_DB = os.getenv("MONGO_DB")
     if not MONGO_DB or MONGO_DB.strip() == "":
         print("⚠️ MONGO_DB is empty. Using default: logs_db")
@@ -87,6 +104,10 @@ def main():
 
         inserted_count = 0
         for log in data:
+            # ✅ Convert timestamp to Morocco time if present
+            if "timestamp" in log:
+                log["timestamp"] = convert_to_morocco(log["timestamp"])
+
             raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
             uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
 
