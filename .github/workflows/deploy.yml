@@ -39,10 +39,11 @@ jobs:
           rm -f logs.json
           lftp -c "
             set ssl:verify-certificate no;
+            set ftp:passive-mode on;
             set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            get /htdocs/logs.json -o logs.json || true;
-          "
+            get /htdocs/logs.json -o logs.json
+          " || true
           if [ ! -f "logs.json" ]; then
             echo "[]" > logs.json
           fi
@@ -66,6 +67,7 @@ jobs:
           echo "🚀 Deploying files..."
           lftp -c "
             set ssl:verify-certificate no;
+            set ftp:passive-mode on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
             mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/
           "
