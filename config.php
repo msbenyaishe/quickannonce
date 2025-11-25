@@ -31,10 +31,10 @@ function getPDO(): PDO {
 
     // Fallback values
     if ($host === '' || $dbname === '' || $user === '' || $pass === '') {
-        $host   = $host   ?: 'sql113.infinityfree.com';
-        $dbname = $dbname ?: 'if0_40443341_quickannoncedynamic_second';
-        $user   = $user   ?: 'if0_40443341';
-        $pass   = $pass   ?: '2Bs5p7q3pv';
+        $host   = $host   ?: 'sql100.infinityfree.com';
+        $dbname = $dbname ?: 'if0_40506470_quickannoncedynamic';
+        $user   = $user   ?: 'if0_40506470';
+        $pass   = $pass   ?: 'dfm320gM6XPl';
     }
     $dsn = "mysql:host={$host};dbname={$dbname};charset=utf8mb4;port=3306";
 
