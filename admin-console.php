@@ -84,7 +84,13 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/datatables-buttons@2.2.2/css/buttons.dataTables.min.css" />
   <style>
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stats-grid { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+      gap: 1.5rem; 
+      margin: 1.5rem 0; 
+      width: 100%;
+    }
     .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; text-align: center; }
     .stat-value { font-size: 2rem; font-weight: 700; color: #111827; margin: 8px 0; }
     .stat-label { color: #6b7280; font-size: 0.875rem; }
@@ -115,12 +121,18 @@
       color: #111827;
       line-height: 1.5;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
     .container {
       max-width: 1200px;
       margin: 0 auto;
-      padding: 0 1rem;
+      padding: 0 2rem;
+      width: 100%;
     }
 
     .header {
@@ -129,15 +141,17 @@
       position: sticky;
       top: 0;
       z-index: 50;
+      width: 100%;
     }
 
     .header-inner {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1rem;
+      padding: 1rem 2rem;
       max-width: 1200px;
       margin: 0 auto;
+      width: 100%;
     }
 
     .brand {
