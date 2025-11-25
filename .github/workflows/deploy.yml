@@ -37,13 +37,14 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           rm -f logs.json
-          lftp -c "
+          lftp -e "
             set ssl:verify-certificate no;
             set ftp:passive-mode on;
             set xfer:clobber on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            get /htdocs/logs.json -o logs.json
-          " || true
+            get /htdocs/logs.json -o logs.json;
+            bye
+          "
           if [ ! -f "logs.json" ]; then
             echo "[]" > logs.json
           fi
@@ -54,8 +55,7 @@ jobs:
           MONGO_URI: ${{ secrets.MONGO_URI }}
           MONGO_DB: ${{ secrets.MONGO_DB }}
           MONGO_COLLECTION: logs
-        run: |
-          python sync_logs_to_mongo.py
+        run: python sync_logs_to_mongo.py
 
       # Deploy all files including updated CSVs
       - name: Deploy to InfinityFree
@@ -65,10 +65,11 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
         run: |
           echo "🚀 Deploying files..."
-          lftp -c "
+          lftp -e "
             set ssl:verify-certificate no;
             set ftp:passive-mode on;
             open -u $FTP_USER,$FTP_PASS $FTP_HOST;
-            mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/
+            mirror -R ./ /htdocs/ --ignore-time --parallel=2 --exclude-glob .git* --exclude .github/;
+            bye
           "
           echo "✅ Deployment completed"
