@@ -15,68 +15,53 @@ import sys
 import argparse
 import pandas as pd
 from pymongo import MongoClient, errors
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 def verify_mongodb_connection(uri: str, db_name: str, collection_name: str) -> Tuple[Optional[MongoClient], Optional[Any], Optional[Any]]:
     """Verify MongoDB connection and return client, db, and collection objects."""
     try:
-        # Test connection with a short timeout
         client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-        
-        # Force connection to check if it's successful
-        client.server_info()
-        
-        # Get database and collection
+        client.server_info()  # Force connection
         db = client[db_name]
         col = db[collection_name]
-        
-        # Test a simple operation
-        col.count_documents({})
-        
-        print(f"✅ Successfully connected to MongoDB: {uri.split('@')[-1]}/{db_name}/{collection_name}")
+        col.count_documents({})  # Simple test
+        print(f"✅ Successfully connected to MongoDB: {db_name}.{collection_name}")
         return client, db, col
-        
-    except errors.ServerSelectionTimeoutError:
-        print(f"❌ Failed to connect to MongoDB server: {uri}")
-        print("Please check your MONGO_URI and ensure the server is accessible")
-    except errors.ConfigurationError as e:
-        print(f"❌ Invalid MongoDB URI: {e}")
+
     except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
-    
-    return None, None, None
+        print(f"❌ MongoDB connection error: {e}")
+        return None, None, None
+
 
 def parse_arguments():
-    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Sync logs to MongoDB')
-    parser.add_argument('--no-clear', action='store_true', 
-                       help='Do not clear logs after processing')
+    parser.add_argument('--no-clear', action='store_true', help='Do not clear logs after processing')
     return parser.parse_args()
+
 
 def main():
     args = parse_arguments()
-    
-    # Get MongoDB configuration from environment
+
+    # Load MongoDB configuration
     MONGO_URI = os.getenv("MONGO_URI")
     if not MONGO_URI:
         print("❌ Error: MONGO_URI environment variable is required!")
         sys.exit(1)
 
-    # Get database and collection names from environment with defaults
     MONGO_DB = os.getenv("MONGO_DB", "logs_db")
     MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "logs")
 
-    print(f"🔌 Attempting to connect to MongoDB: {MONGO_DB}.{MONGO_COLLECTION}")
-    
-    # Verify and establish MongoDB connection
-    client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB, MONGO_COLLECTION)
-    if None in (client, db, col):
-        print("❌ Exiting due to MongoDB connection issues")
-        return
+    print(f"🔌 Connecting to MongoDB: {MONGO_DB}.{MONGO_COLLECTION}")
 
-    # --- Read logs.json ---
+    client, db, col = verify_mongodb_connection(MONGO_URI, MONGO_DB, MONGO_COLLECTION)
+    if not client:
+        sys.exit(1)
+
+    # Read logs.json
     if not os.path.exists("logs.json"):
-        print("ℹ️ No logs.json file found.")
+        print("ℹ️ logs.json does not exist. Creating database anyway...")
+        col.insert_one({"_init": True})
+        col.delete_many({"_init": True})
         return
 
     print("📄 Reading logs.json...")
@@ -84,68 +69,67 @@ def main():
         try:
             data = json.load(f)
         except json.JSONDecodeError:
-            print("❌ Error: logs.json is not valid JSON")
-            return
+            print("❌ logs.json is not valid JSON")
+            sys.exit(1)
 
+        # If logs.json is empty, still force DB creation
         if not data:
-            print("ℹ️ No logs to process.")
+            print("ℹ️ logs.json is empty. Ensuring database/collection exists...")
+            col.insert_one({"_init": True})
+            col.delete_many({"_init": True})
             return
 
-        # Ensure data is a list
         if isinstance(data, dict):
             data = [data]
 
-        # --- Insert into MongoDB without duplicates ---
+        # Insert logs
         inserted_count = 0
         for log in data:
-            # Generate unique ID based on log content
             raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
             uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
-            
-            # Add ID to log
+
             log_with_id = {**log, "_id": uid}
-            
-            # Insert if not exists
+
             result = col.update_one(
                 {"_id": uid},
                 {"$setOnInsert": log_with_id},
                 upsert=True
             )
-            
-            if result.upserted_id is not None:
+
+            if result.upserted_id:
                 inserted_count += 1
 
-        print(f"✅ {inserted_count} new logs inserted into MongoDB (no duplicates)")
+        print(f"✅ {inserted_count} new logs inserted (no duplicates)")
 
-        # Clear the file if --no-clear is not set
+        # Clear logs.json after processing
         if not args.no_clear:
-            print("🧹 Clearing logs.json after successful processing")
+            print("🧹 Clearing logs.json...")
             f.seek(0)
             f.truncate()
             json.dump([], f)
 
-    # --- Generate stats ---
+    # Generate stats
     pipeline = [
         {"$group": {"_id": "$action", "total": {"$sum": 1}}},
         {"$sort": {"total": -1}}
     ]
     stats = list(col.aggregate(pipeline))
 
-    # --- Export to CSV ---
     if stats:
         df = pd.DataFrame(stats).rename(columns={"_id": "action"})
         df.to_csv("stats_actions.csv", index=False)
         print("📊 Generated stats_actions.csv")
     else:
-        print("ℹ️ No data to generate stats_actions.csv")
-        
-    # --- Export all logs to CSV ---
-    all_logs = list(col.find({}, {"_id": 0}))  # Exclude _id field
+        print("ℹ️ No stats to export")
+
+    # Export full logs
+    all_logs = list(col.find({}, {"_id": 0}))
     if all_logs:
         pd.DataFrame(all_logs).to_csv("logs.csv", index=False)
         print("📝 Generated logs.csv")
     else:
-        print("ℹ️ No logs to export to CSV")
+        print("ℹ️ No logs to export")
+
 
 if __name__ == "__main__":
     main()
