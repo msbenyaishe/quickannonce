@@ -78,58 +78,63 @@ def main():
     if not client:
         sys.exit(1)
 
-    # Read logs.json
-    if not os.path.exists("logs.json"):
-        print("ℹ️ logs.json does not exist. Creating database anyway...")
-        col.insert_one({"_init": True})
-        col.delete_many({"_init": True})
-        return
+    # Read logs.json and insert into DB
+    if os.path.exists("logs.json"):
+        print("📄 Reading logs.json...")
+        with open("logs.json", "r+", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                print("❌ logs.json is not valid JSON")
+                sys.exit(1)
 
-    print("📄 Reading logs.json...")
-    with open("logs.json", "r+", encoding="utf-8") as f:
-        try:
-            data = json.load(f)
-        except json.JSONDecodeError:
-            print("❌ logs.json is not valid JSON")
-            sys.exit(1)
+            if not data:
+                print("ℹ️ logs.json is empty.")
+                data = []
 
-        if not data:
-            print("ℹ️ logs.json is empty. Ensuring database/collection exists...")
-            col.insert_one({"_init": True})
-            col.delete_many({"_init": True})
-            return
+            if isinstance(data, dict):
+                data = [data]
 
-        if isinstance(data, dict):
-            data = [data]
+            inserted_count = 0
+            for log in data:
+                # Convert timestamp to Morocco time if present
+                if "timestamp" in log:
+                    log["timestamp"] = convert_to_morocco(log["timestamp"])
 
-        inserted_count = 0
-        for log in data:
-            # ✅ Convert timestamp to Morocco time if present
-            if "timestamp" in log:
-                log["timestamp"] = convert_to_morocco(log["timestamp"])
+                raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
+                uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
+                log_with_id = {**log, "_id": uid}
 
-            raw = json.dumps(log, sort_keys=True, ensure_ascii=False)
-            uid = hashlib.md5(raw.encode("utf-8")).hexdigest()
+                result = col.update_one(
+                    {"_id": uid},
+                    {"$setOnInsert": log_with_id},
+                    upsert=True
+                )
 
-            log_with_id = {**log, "_id": uid}
+                if result.upserted_id:
+                    inserted_count += 1
 
-            result = col.update_one(
-                {"_id": uid},
-                {"$setOnInsert": log_with_id},
-                upsert=True
-            )
+            print(f"✅ {inserted_count} new logs inserted (no duplicates)")
 
-            if result.upserted_id:
-                inserted_count += 1
+            # Clear logs.json after processing
+            if not args.no_clear:
+                print("🧹 Clearing logs.json...")
+                f.seek(0)
+                f.truncate()
+                json.dump([], f)
+    else:
+        print("ℹ️ logs.json does not exist. Skipping insert.")
 
-        print(f"✅ {inserted_count} new logs inserted (no duplicates)")
+    # --- FIXED CSV EXPORT: always from MongoDB ---
+    # Export full logs from MongoDB
+    all_logs = list(col.find({}, {"_id": 0}))
+    if all_logs:
+        pd.DataFrame(all_logs).to_csv("logs.csv", index=False)
+        print(f"📝 Exported {len(all_logs)} logs from DB to logs.csv")
+    else:
+        print("ℹ️ No logs in database to export")
 
-        if not args.no_clear:
-            print("🧹 Clearing logs.json...")
-            f.seek(0)
-            f.truncate()
-            json.dump([], f)
-
+    # Export stats from MongoDB
     pipeline = [
         {"$group": {"_id": "$action", "total": {"$sum": 1}}},
         {"$sort": {"total": -1}}
@@ -139,16 +144,9 @@ def main():
     if stats:
         df = pd.DataFrame(stats).rename(columns={"_id": "action"})
         df.to_csv("stats_actions.csv", index=False)
-        print("📊 Generated stats_actions.csv")
+        print(f"📊 Exported {len(stats)} stats from DB to stats_actions.csv")
     else:
-        print("ℹ️ No stats to export")
-
-    all_logs = list(col.find({}, {"_id": 0}))
-    if all_logs:
-        pd.DataFrame(all_logs).to_csv("logs.csv", index=False)
-        print("📝 Generated logs.csv")
-    else:
-        print("ℹ️ No logs to export")
+        print("ℹ️ No stats in database to export")
 
 
 if __name__ == "__main__":
