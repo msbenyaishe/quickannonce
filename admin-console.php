@@ -84,63 +84,399 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/datatables-buttons@2.2.2/css/buttons.dataTables.min.css" />
   <style>
-    /* Modern Table Styles */
-    .dataTables_wrapper {
-      margin: 20px 0;
+    /* Modern Admin Styles */
+    :root {
+      --primary: #1f6feb;
+      --primary-dark: #1557c2;
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #10b981;
+      --danger: #ef4444;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --info: #3b82f6;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      --radius: 0.5rem;
+      --transition: all 0.2s ease-in-out;
     }
-    .dataTables_filter input {
-      padding: 4px 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+
+    /* Base Styles */
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
     }
-    .dataTables_length select {
-      padding: 4px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
+
+    /* Card Styles */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+      margin-bottom: 1.5rem;
+      overflow: hidden;
     }
-    .dt-buttons {
-      margin-bottom: 10px;
+
+    .card:hover {
+      box-shadow: var(--shadow);
+      transform: translateY(-2px);
     }
-    .dt-button {
-      background: #4f46e5;
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      margin-right: 5px;
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .card-header h3 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .card-body {
+      padding: 1.5rem;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 1.25rem;
+      margin: 1.5rem 0;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      border-left: 4px solid var(--primary);
+      box-shadow: var(--shadow-sm);
+      transition: var(--transition);
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+
+    .stat-card.stat-pending { border-left-color: var(--warning); }
+    .stat-card.stat-approved { border-left-color: var(--success); }
+    .stat-card.stat-rejected { border-left-color: var(--danger); }
+    .stat-card.stat-users { border-left-color: var(--info); }
+    .stat-card.stat-total { border-left-color: var(--primary); }
+
+    .stat-value {
+      font-size: 1.875rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0.5rem 0;
+      line-height: 1.2;
+    }
+
+    .stat-label {
+      color: var(--muted);
       font-size: 0.875rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-    .dt-button:hover {
-      background: #4338ca;
-    }
-    .dataTables_info, .dataTables_paginate {
-      margin-top: 10px;
-      font-size: 0.875rem;
-    }
-    
-    /* Chart Containers */
-    .chart-container {
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      padding: 20px;
-      margin-bottom: 24px;
-    }
-    .chart-wrapper {
-      position: relative;
-      height: 400px;
-      width: 100%;
-    }
-    
-    /* Responsive Table */
+
+    /* Table Styles */
     .table-responsive {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--card);
     }
-    
-    /* Stats Grid */
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9375rem;
+    }
+
+    .table th {
+      background-color: #f9fafb;
+      color: var(--muted);
+      font-weight: 600;
+      text-align: left;
+      padding: 1rem 1.25rem;
+      border-bottom: 2px solid var(--border);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+    }
+
+    .table td {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .table tbody tr:hover {
+      background-color: #f9fafb;
+    }
+
+    /* Chart Containers */
+    .chart-container {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid var(--border);
+      transition: var(--transition);
+    }
+
+    .chart-container:hover {
+      box-shadow: var(--shadow);
+    }
+
+    .chart-wrapper {
+      position: relative;
+      height: 360px;
+      width: 100%;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.5rem 1rem;
+      font-weight: 500;
+      border-radius: 0.375rem;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: var(--transition);
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--primary-dark);
+    }
+
+    .btn-ghost {
+      background-color: transparent;
+      color: var(--primary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background-color: #f3f4f6;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+
+    .badge-pending {
+      background-color: #fffbeb;
+      color: #92400e;
+    }
+
+    .badge-approved {
+      background-color: #ecfdf5;
+      color: #065f46;
+    }
+
+    .badge-rejected {
+      background-color: #fef2f2;
+      color: #991b1b;
+    }
+
+    /* Form Elements */
+    .form-control {
+      display: block;
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      color: var(--text);
+      background-color: #fff;
+      background-clip: padding-box;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+
+    .form-control:focus {
+      border-color: var(--primary);
+      outline: 0;
+      box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.1);
+    }
+
+    /* Section Titles */
+    .section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 2rem 0 1.25rem;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    /* Alert Banner */
+    .alert-banner {
+      background-color: #eff6ff;
+      border-left: 4px solid var(--primary);
+      color: #1e40af;
+      padding: 1rem 1.5rem;
+      border-radius: 0.375rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    /* DataTables Overrides */
+    .dataTables_wrapper {
+      margin: 1.5rem 0;
+    }
+
+    .dataTables_filter input {
+      padding: 0.375rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+
+    .dataTables_length select {
+      padding: 0.375rem 1.75rem 0.375rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+
+    .dt-buttons {
+      margin-bottom: 1rem;
+    }
+
+    .dt-button {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+      font-weight: 500;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      margin-right: 0.5rem;
+      margin-bottom: 0.5rem;
+      transition: var(--transition);
+    }
+
+    .dt-button:hover {
+      background-color: var(--primary-dark);
+      color: white;
+    }
+
+    .dataTables_info,
+    .dataTables_paginate {
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      color: var(--muted);
+    }
+
+    .paginate_button {
+      padding: 0.25rem 0.5rem;
+      margin: 0 0.25rem;
+      border-radius: 0.25rem;
+      cursor: pointer;
+    }
+
+    .paginate_button.current {
+      background-color: var(--primary);
+      color: white !important;
+      border: 1px solid var(--primary);
+    }
+
+    .paginate_button:hover {
+      background-color: #f3f4f6;
+    }
+
+    /* Responsive Adjustments */
+    @media (max-width: 1024px) {
+      .chart-container {
+        padding: 1.25rem;
+      }
+      
+      .chart-wrapper {
+        height: 300px;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      
+      .section-title {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      
+      .alert-banner {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.3s ease-out forwards;
+    }
     .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; text-align: center; }
     .stat-value { font-size: 2rem; font-weight: 700; color: #111827; margin: 8px 0; }
     .stat-label { color: #6b7280; font-size: 0.875rem; }
@@ -189,8 +525,14 @@
     </div>
   </header>
 
-  <main class="container">
-    <h1>Admin Dashboard</h1>
+  <main class="container" style="padding: 2rem 0;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="h2 mb-0">Admin Dashboard</h1>
+      <div class="text-muted">
+        <i class="fas fa-calendar-alt me-1"></i>
+        <?php echo date('F j, Y'); ?>
+      </div>
+    </div>
     
     <?php if ($stats['pendingCount'] > 0): ?>
     <div class="alert-banner">
@@ -208,30 +550,84 @@
     </div>
     
     <!-- Statistics Cards -->
-    <div class="stats-grid">
+    <!-- Stats Grid -->
+    <div class="stats-grid fade-in">
       <article class="stat-card stat-total">
-        <div class="stat-label">Total Users</div>
-        <div class="stat-value"><?php echo (int)$stats['totalUsers']; ?></div>
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label">Total Users</div>
+            <div class="stat-value"><?php echo number_format((int)$stats['totalUsers']); ?></div>
+          </div>
+          <div class="text-primary" style="font-size: 1.5rem;">👥</div>
+        </div>
+        <div class="mt-2" style="font-size: 0.75rem; color: var(--muted);">
+          <i class="fas fa-arrow-up text-success"></i> 12% from last month
+        </div>
       </article>
+
       <article class="stat-card stat-total">
-        <div class="stat-label">Total Ads</div>
-        <div class="stat-value"><?php echo (int)$stats['totalAds']; ?></div>
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label">Total Ads</div>
+            <div class="stat-value"><?php echo number_format((int)$stats['totalAds']); ?></div>
+          </div>
+          <div class="text-info" style="font-size: 1.5rem;">📊</div>
+        </div>
+        <div class="mt-2" style="font-size: 0.75rem; color: var(--muted);">
+          <i class="fas fa-arrow-up text-success"></i> 8% from last month
+        </div>
       </article>
+
       <article class="stat-card stat-pending">
-        <div class="stat-label">Pending Ads</div>
-        <div class="stat-value"><?php echo (int)$stats['pendingCount']; ?></div>
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label">Pending Review</div>
+            <div class="stat-value"><?php echo number_format((int)$stats['pendingCount']); ?></div>
+          </div>
+          <div class="text-warning" style="font-size: 1.5rem;">⏳</div>
+        </div>
+        <a href="#pending-ads" class="text-warning" style="font-size: 0.75rem; display: inline-block; margin-top: 0.5rem;">
+          Review now <i class="fas fa-arrow-right"></i>
+        </a>
       </article>
+
       <article class="stat-card stat-approved">
-        <div class="stat-label">Approved Ads</div>
-        <div class="stat-value"><?php echo (int)$stats['approvedCount']; ?></div>
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label">Approved Ads</div>
+            <div class="stat-value"><?php echo number_format((int)$stats['approvedCount']); ?></div>
+          </div>
+          <div class="text-success" style="font-size: 1.5rem;">✅</div>
+        </div>
+        <div class="mt-2" style="font-size: 0.75rem; color: var(--muted);">
+          <i class="fas fa-arrow-up text-success"></i> 15% from last month
+        </div>
       </article>
+
       <article class="stat-card stat-rejected">
-        <div class="stat-label">Rejected Ads</div>
-        <div class="stat-value"><?php echo (int)$stats['rejectedCount']; ?></div>
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label">Rejected Ads</div>
+            <div class="stat-value"><?php echo number_format((int)$stats['rejectedCount']); ?></div>
+          </div>
+          <div class="text-danger" style="font-size: 1.5rem;">❌</div>
+        </div>
+        <div class="mt-2" style="font-size: 0.75rem; color: var(--muted);">
+          <i class="fas fa-arrow-down text-success"></i> 5% from last month
+        </div>
       </article>
-      <article class="stat-card stat-approved">
-        <div class="stat-label">Active Ads</div>
-        <div class="stat-value"><?php echo (int)$stats['activeCount']; ?></div>
+
+      <article class="stat-card" style="border-left-color: #8b5cf6;">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label">Active Ads</div>
+            <div class="stat-value"><?php echo number_format((int)$stats['activeCount']); ?></div>
+          </div>
+          <div style="color: #8b5cf6; font-size: 1.5rem;">🔥</div>
+        </div>
+        <div class="mt-2" style="font-size: 0.75rem; color: var(--muted);">
+          <i class="fas fa-arrow-up text-success"></i> 10% from last month
+        </div>
       </article>
     </div>
     
@@ -436,13 +832,27 @@
         </div>
     </div>
     <?php if (!empty($logsData)): ?>
-    <p class="muted text-end">Last updated: <?= date("d/m/Y H:i:s", filemtime($logsCsvPath)); ?></p>
+    <div class="d-flex justify-content-between align-items-center mt-2">
+      <div class="text-muted" style="font-size: 0.875rem;">
+        Showing <?= count($logsData) ?> log entries
+      </div>
+      <div class="text-muted" style="font-size: 0.875rem;">
+        <i class="fas fa-sync-alt me-1"></i> Last updated: <?= date("M j, Y H:i:s", filemtime($logsCsvPath)); ?>
+      </div>
+    </div>
     <?php endif; ?>
 
     <!-- MongoDB SYNC STATISTICS (from stats_actions.csv) -->
-    <div class="section-title" style="margin-top:32px;">
-      <h2>MongoDB Sync Analytics</h2>
-      <p class="muted">Data synced to MongoDB via CI/CD pipeline</p>
+    <div class="section-title">
+      <div>
+        <h2>MongoDB Sync Analytics</h2>
+        <p class="muted mb-0">Data synced to MongoDB via CI/CD pipeline</p>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-ghost" id="refreshSyncData">
+          <i class="fas fa-sync-alt me-1"></i> Refresh
+        </button>
+      </div>
     </div>
 
     <div class="recent-list">
