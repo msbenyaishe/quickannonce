@@ -80,7 +80,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Admin Dashboard - QuickAnnonce</title>
   <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/datatables-buttons@2.2.2/css/buttons.dataTables.min.css" />
   <style>
+    /* Modern Table Styles */
+    .dataTables_wrapper {
+      margin: 20px 0;
+    }
+    .dataTables_filter input {
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .dataTables_length select {
+      padding: 4px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .dt-buttons {
+      margin-bottom: 10px;
+    }
+    .dt-button {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 5px;
+      font-size: 0.875rem;
+    }
+    .dt-button:hover {
+      background: #4338ca;
+    }
+    .dataTables_info, .dataTables_paginate {
+      margin-top: 10px;
+      font-size: 0.875rem;
+    }
+    
+    /* Chart Containers */
+    .chart-container {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .chart-wrapper {
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+    
+    /* Responsive Table */
+    .table-responsive {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Stats Grid */
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; text-align: center; }
     .stat-value { font-size: 2rem; font-weight: 700; color: #111827; margin: 8px 0; }
@@ -260,58 +319,125 @@
       <p class="muted">Data exported from MongoDB (logs.csv)</p>
     </div>
 
-    <div class="recent-list">
-<?php
-$csvPath = __DIR__ . "/logs.csv";
-
-if (!file_exists($csvPath)) {
-    echo "<div class='muted'>No log data available.</div>";
-} else {
+    <?php
+    // Read logs from CSV
+    $logsCsvPath = __DIR__ . "/logs.csv";
+    $logsData = [];
     $logsHeader = [];
-    $logsRows = [];
-    if (($handle = fopen($csvPath, 'r')) !== false) {
-        if (($logsHeader = fgetcsv($handle)) !== false) {
-            while (($row = fgetcsv($handle)) !== false) {
-                $logsRows[] = $row;
-            }
+    
+    if (file_exists($logsCsvPath) && ($handle = fopen($logsCsvPath, 'r')) !== false) {
+        $logsHeader = fgetcsv($handle);
+        while (($row = fgetcsv($handle)) !== false) {
+            $logsData[] = array_combine($logsHeader, $row);
         }
         fclose($handle);
     }
-
-    if (empty($logsHeader)) {
-        echo "<div class='muted'>No log data available.</div>";
-    } else {
-?>
-    <table class="table table-bordered table-hover">
-      <thead class="table-dark">
-        <tr>
-          <?php foreach ($logsHeader as $col): ?>
-            <th><?= h($col); ?></th>
-          <?php endforeach; ?>
-        </tr>
-      </thead>
-      <tbody>
-        <?php if (empty($logsRows)): ?>
-        <tr>
-          <td colspan="<?= count($logsHeader); ?>">No log entries recorded yet.</td>
-        </tr>
-        <?php else: ?>
-          <?php foreach ($logsRows as $row): ?>
-          <tr>
-            <?php foreach ($logsHeader as $index => $col): ?>
-            <td><?= h($row[$index] ?? ''); ?></td>
-            <?php endforeach; ?>
-          </tr>
-          <?php endforeach; ?>
-        <?php endif; ?>
-      </tbody>
-    </table>
-    <p class="muted text-end">Last updated: <?= date("d/m/Y H:i:s", filemtime($csvPath)); ?></p>
-<?php
+    
+    // Read stats from CSV
+    $statsCsvPath = __DIR__ . "/stats_actions.csv";
+    $statsData = [];
+    $statsHeader = [];
+    
+    if (file_exists($statsCsvPath) && ($handle = fopen($statsCsvPath, 'r')) !== false) {
+        $statsHeader = fgetcsv($handle);
+        while (($row = fgetcsv($handle)) !== false) {
+            $statsData[] = array_combine($statsHeader, $row);
+        }
+        fclose($handle);
     }
-}
-?>
+    
+    // Prepare action statistics
+    $actionCounts = [];
+    $actionTimeline = [];
+    
+    if (!empty($logsData)) {
+        foreach ($logsData as $log) {
+            if (isset($log['action'])) {
+                $action = $log['action'];
+                $date = isset($log['timestamp']) ? date('Y-m-d', strtotime($log['timestamp'])) : 'unknown';
+                
+                // Count actions
+                if (!isset($actionCounts[$action])) {
+                    $actionCounts[$action] = 0;
+                }
+                $actionCounts[$action]++;
+                
+                // Prepare timeline data
+                if (!isset($actionTimeline[$date])) {
+                    $actionTimeline[$date] = [];
+                }
+                if (!isset($actionTimeline[$date][$action])) {
+                    $actionTimeline[$date][$action] = 0;
+                }
+                $actionTimeline[$date][$action]++;
+            }
+        }
+    }
+    ?>
+    
+    <!-- Action Statistics Charts -->
+    <div class="row" style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px; margin-bottom: 30px;">
+        <!-- Doughnut Chart for Action Distribution -->
+        <div class="chart-container">
+            <h3>Action Distribution</h3>
+            <div class="chart-wrapper">
+                <canvas id="actionPieChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- Line Chart for Action Trends -->
+        <div class="chart-container">
+            <h3>Action Trends Over Time</h3>
+            <div class="chart-wrapper">
+                <canvas id="actionLineChart"></canvas>
+            </div>
+        </div>
     </div>
+    
+    <!-- Logs Table -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Activity Logs</h3>
+            <div class="table-actions">
+                <input type="text" id="logSearch" placeholder="Search logs..." class="form-control" style="width: 200px; display: inline-block; margin-right: 10px;">
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table id="logsTable" class="table table-striped table-bordered" style="width:100%">
+                    <thead>
+                        <tr>
+                            <?php if (!empty($logsHeader)): ?>
+                                <?php foreach ($logsHeader as $header): ?>
+                                    <th><?= htmlspecialchars($header) ?></th>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <th>No log data available</th>
+                            <?php endif; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (!empty($logsData)): ?>
+                            <?php foreach ($logsData as $log): ?>
+                                <tr>
+                                    <?php foreach ($logsHeader as $field): ?>
+                                        <td><?= isset($log[$field]) ? htmlspecialchars($log[$field]) : '' ?></td>
+                                    <?php endforeach; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="<?= count($logsHeader) ?: 1 ?>">No log entries found.</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <?php if (!empty($logsData)): ?>
+    <p class="muted text-end">Last updated: <?= date("d/m/Y H:i:s", filemtime($logsCsvPath)); ?></p>
+    <?php endif; ?>
 
     <!-- MongoDB SYNC STATISTICS (from stats_actions.csv) -->
     <div class="section-title" style="margin-top:32px;">
@@ -429,13 +555,186 @@ if (!file_exists($csv)) {
 
   <footer class="footer">
     <div class="container footer-inner">
-      <div><strong>QuickAnnonce</strong><div class="muted">© <span id="year"></span></div></div>
+      <div><strong>QuickAnnonce</strong><div class="muted">  <span id="year"></span></div></div>
       <div style="display:flex; gap:12px;"><a href="contact.php">Contact</a></div>
     </div>
   </footer>
+  <!-- Required Scripts -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.2.2/js/dataTables.buttons.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.2.2/js/buttons.html5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.5/pdfmake.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.5/vfs_fonts.js"></script>
+  
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
+    
+    // Mobile menu toggle
+    document.querySelector('.mobile-toggle').addEventListener('click', function() {
+      document.querySelector('.nav').classList.toggle('show');
+    });
+    
+    // Initialize DataTable for logs
+    $(document).ready(function() {
+      // Initialize DataTable with export buttons
+      var table = $('#logsTable').DataTable({
+        dom: 'Bfrtip',
+        buttons: [
+          'copy', 'csv', 'excel', 'pdf', 'print'
+        ],
+        responsive: true,
+        pageLength: 25,
+        order: [],
+        columnDefs: [
+          { orderable: true, targets: '_all' },
+          { className: 'dt-center', targets: '_all' }
+        ],
+        language: {
+          search: "_INPUT_",
+          searchPlaceholder: "Search logs...",
+          lengthMenu: "Show _MENU_ entries per page",
+          zeroRecords: "No matching records found",
+          info: "Showing _START_ to _END_ of _TOTAL_ entries",
+          infoEmpty: "No entries available",
+          infoFiltered: "(filtered from _MAX_ total entries)",
+          paginate: {
+            first: "First",
+            last: "Last",
+            next: "Next",
+            previous: "Previous"
+          }
+        }
+      });
+      
+      // Custom search input
+      $('#logSearch').on('keyup', function() {
+        table.search(this.value).draw();
+      });
+      
+      // Action Distribution Pie Chart
+      <?php if (!empty($actionCounts)): ?>
+      const pieCtx = document.getElementById('actionPieChart').getContext('2d');
+      const pieChart = new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+          labels: <?= json_encode(array_keys($actionCounts)) ?>,
+          datasets: [{
+            data: <?= json_encode(array_values($actionCounts)) ?>,
+            backgroundColor: [
+              '#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+              '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#a855f7'
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'right',
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.label || '';
+                  const value = context.raw || 0;
+                  const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                  const percentage = Math.round((value / total) * 100);
+                  return `${label}: ${value} (${percentage}%)`;
+                }
+              }
+            }
+          }
+        }
+      });
+      <?php endif; ?>
+      
+      // Action Trends Line Chart
+      <?php if (!empty($actionTimeline)): ?>
+      // Prepare data for line chart
+      const dates = <?= json_encode(array_keys($actionTimeline)) ?>;
+      const actions = [...new Set(arrayFlatMap(Object.values($actionTimeline), Object.keys))];
+      const datasets = [];
+      
+      const colors = [
+        { bg: 'rgba(79, 70, 229, 0.1)', border: '#4f46e5' },
+        { bg: 'rgba(16, 185, 129, 0.1)', border: '#10b981' },
+        { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b' },
+        { bg: 'rgba(239, 68, 68, 0.1)', border: '#ef4444' },
+        { bg: 'rgba(139, 92, 246, 0.1)', border: '#8b5cf6' },
+        { bg: 'rgba(236, 72, 153, 0.1)', border: '#ec4899' },
+        { bg: 'rgba(20, 184, 166, 0.1)', border: '#14b8a6' },
+        { bg: 'rgba(249, 115, 22, 0.1)', border: '#f97316' },
+        { bg: 'rgba(6, 182, 212, 0.1)', border: '#06b6d4' },
+        { bg: 'rgba(168, 85, 247, 0.1)', border: '#a855f7' }
+      ];
+      
+      actions.forEach((action, index) => {
+        const data = dates.map(date => $actionTimeline[date][action] || 0);
+        const colorIndex = index % colors.length;
+        datasets.push({
+          label: action,
+          data: data,
+          backgroundColor: colors[colorIndex].bg,
+          borderColor: colors[colorIndex].border,
+          borderWidth: 2,
+          tension: 0.3,
+          fill: false
+        });
+      });
+      
+      const lineCtx = document.getElementById('actionLineChart').getContext('2d');
+      const lineChart = new Chart(lineCtx, {
+        type: 'line',
+        data: {
+          labels: dates,
+          datasets: datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                precision: 0
+              }
+            },
+            x: {
+              ticks: {
+                maxRotation: 45,
+                minRotation: 45
+              }
+            }
+          },
+          plugins: {
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+            },
+            legend: {
+              position: 'top',
+            }
+          },
+          interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+          }
+        }
+      });
+      
+      // Helper function to flatten arrays
+      function arrayFlatMap(arr, fn) {
+        return arr.reduce((acc, x) => acc.concat(fn(x)), []);
+      }
+      <?php endif; ?>
+    });
   </script>
-  <script src="js/mobile-toggle.js"></script>
 </body>
 </html>
